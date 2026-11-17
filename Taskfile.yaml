@@ -1,0 +1,107 @@
+version: "3"
+
+# heap-lab. `task` lists everything. NODE is a short name: greene, crosby, broome.
+
+tasks:
+  default:
+    silent: true
+    cmds: [task --list]
+
+  # ── Lifecycle ──────────────────────────────────────────────────────────────
+  setup:
+    desc: One-time checks (Lima 2.x, user-v2 subnet, tools) and cluster-config's Ansible collections
+    cmds: [scripts/setup.sh]
+
+  up:
+    desc: "Build to a stage, or resume it: STAGE=old (Heap today, default) or STAGE=new (after the migration)"
+    cmds: ['scripts/up.sh {{.STAGE}}']
+
+  down:
+    desc: Stop the VMs, keeping everything
+    cmds: [scripts/down.sh]
+
+  destroy:
+    desc: "Delete VMs, disks, .state/ and snapshots (prompts unless FORCE=1)"
+    cmds: ['scripts/destroy.sh {{if eq .FORCE "1"}}-f{{end}}']
+
+  rebuild:
+    desc: "destroy without asking, then up (STAGE=...)"
+    cmds:
+      - scripts/destroy.sh -f
+      - 'scripts/up.sh {{.STAGE}}'
+
+  status:
+    desc: VMs, stage, every cluster's nodes and stuck pods, snapshots, /data check
+    silent: true
+    cmds: [scripts/status.sh]
+
+  ssh:
+    desc: "Shell on a node (NODE=greene by default)"
+    interactive: true
+    cmds: ['limactl shell --workdir / heap-{{.NODE | default "greene"}}']
+
+  kubeconfig:
+    desc: Re-fetch .state/kube/{new,crosby,old}.yaml and .state/ssh_config
+    cmds: [scripts/ssh_config.sh, scripts/kubeconfig.sh]
+
+  # ── Snapshots ──────────────────────────────────────────────────────────────
+  snap:
+    desc: "Snapshot the whole lab (NAME=..., optional NOTE=...). Stops and restarts the VMs; takes seconds."
+    cmds: ['scripts/snap.sh save {{.NAME}}']
+    requires: {vars: [NAME]}
+
+  restore:
+    desc: "Put the whole lab back to a snapshot (NAME=old-fresh, new-fresh, ...)"
+    cmds: ['scripts/snap.sh restore {{.NAME}}']
+    requires: {vars: [NAME]}
+
+  snaps:
+    desc: List snapshots
+    silent: true
+    cmds: [scripts/snap.sh list]
+
+  # ── cluster-config, run against the lab ────────────────────────────────────
+  play:
+    desc: "Any playbook, from playbooks/ or HEAP_REPO: task play -- k3s.yml -l greene.heap-lab"
+    cmds: ['scripts/play.sh {{.CLI_ARGS}}']
+
+  k3s:
+    desc: "cluster-config's k3s.yml (extra args after --, e.g. -- -e k3s_allow_upgrade=true)"
+    cmds: ['scripts/play.sh k3s.yml {{.CLI_ARGS}}']
+
+  teardown:
+    desc: "cluster-config's k3s-teardown.yml on one node (NODE=...)"
+    cmds: ['scripts/play.sh k3s-teardown.yml -e teardown_host={{.NODE}}.heap-lab -e teardown_confirm={{.NODE}} -e old_cluster_server=broome.heap-lab {{.CLI_ARGS}}']
+    requires: {vars: [NODE]}
+
+  card:
+    desc: "heap-migration.md's node card, b to m, with every check (NODE=greene, then crosby, ... broome)"
+    cmds: ['scripts/card.sh {{.NODE}}']
+    requires: {vars: [NODE]}
+
+  check:
+    desc: "cluster-config's heap-check.sh: task check -- baseline | clean greene | joined greene"
+    cmds: ['scripts/check.sh {{.CLI_ARGS}}']
+
+  # ── Instruments ────────────────────────────────────────────────────────────
+  watch:
+    desc: "Probe APIs and Ingress every second until Ctrl-C, then print outages. Run in its own terminal."
+    interactive: true
+    cmds: [scripts/watch.sh]
+
+  canary:
+    desc: "Deploy the canary to CLUSTER=new (default) or old; delete with CLUSTER=delete-new|delete-old"
+    cmds: ['scripts/canary.sh {{.CLUSTER | default "new"}}']
+
+  data-check:
+    desc: Prove broome's /data is unchanged since the last build (or data-record)
+    cmds: [scripts/data.sh check]
+
+  data-record:
+    desc: Take a new /data baseline
+    cmds: [scripts/data.sh record]
+
+  timeline:
+    desc: Seconds per phase, for the last few builds
+    silent: true
+    cmds: ["column -s, -t < .state/timeline.csv | tail -30"]

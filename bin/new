@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# kubectl against the new cluster (greene), as heap-migration.md's new().
+exec env KUBECONFIG="$(cd "$(dirname "$0")/.." && pwd)/.state/kube/new.yaml" kubectl "$@"

@@ -1,0 +1,82 @@
+# Every heap-lab node. scripts/up.sh creates each instance from this file with
+#   --set '.param.NodeIP = "192.168.104.x"'  --set '.param.Hostname = "greene"'
+#   --set '.param.Gateway = "192.168.104.2"'
+# and sets cpus, memory, images, portForwards and (broome) the data disk.
+#
+# Provisioning here is only what has to exist before Ansible can reach the
+# node: the fixed address and the hostname. Everything else is Ansible, from
+# playbooks/ and from the cluster-config roles, so it can be read and re-run.
+
+minimumLimaVersion: "2.0.0"
+vmType: "vz"
+os: "Linux"
+cpus: 2
+memory: "4GiB"
+disk: "30GiB"
+
+containerd:
+  system: false
+  user: false
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+
+# Heap nodes don't see anyone's laptop. Nothing is shared; this also drops
+# Lima's default home mount.
+mounts: []
+
+# One NIC, like every Heap node. user-v2 makes the VMs L2 neighbours, which
+# Cilium's autoDirectNodeRoutes needs.
+networks:
+  - lima: user-v2
+
+# up.sh replaces this with: the node's 6443 to its own host port, then
+# ignore everything else (Lima would otherwise forward every guest port).
+portForwards:
+  - ignore: true
+    proto: any
+    guestIP: "0.0.0.0"
+
+param:
+  NodeIP: ""
+  Hostname: ""
+  Gateway: ""
+
+provision:
+  # The fixed address becomes eth0's primary (static addresses come up before
+  # DHCP), and the default route uses it. Lima's DHCP address stays as a
+  # secondary: Lima's ssh is forwarded to it, and changing it hangs limactl.
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eu
+      [ -f /etc/netplan/60-heap-lab.yaml ] && exit 0
+      cat > /etc/netplan/60-heap-lab.yaml <<NETPLAN
+      network:
+        version: 2
+        ethernets:
+          eth0:
+            dhcp4: true
+            dhcp4-overrides:
+              use-routes: false
+            addresses: [{{.Param.NodeIP}}/24]
+            routes:
+              - to: default
+                via: {{.Param.Gateway}}
+      NETPLAN
+      chmod 600 /etc/netplan/60-heap-lab.yaml
+      netplan apply
+      hostnamectl set-hostname {{.Param.Hostname}}
+
+probes:
+  - mode: readiness
+    description: fixed address is up
+    script: |
+      #!/bin/bash
+      ip -4 -o addr show dev eth0 | grep -q " {{.Param.NodeIP}}/"
+    hint: |
+      limactl shell <instance> -- sudo cat /etc/netplan/60-heap-lab.yaml
+      limactl shell <instance> -- ip -br addr

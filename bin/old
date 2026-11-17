@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# kubectl against the old cluster (broome), as heap-migration.md's old().
+exec env KUBECONFIG="$(cd "$(dirname "$0")/.." && pwd)/.state/kube/old.yaml" kubectl "$@"

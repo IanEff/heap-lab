@@ -1,0 +1,8 @@
+---
+k3s_node_ip: "{{ lookup('env', 'LAB_IP_BROOME') }}"
+# cluster-config's roles/nfs_server: sdb on Heap, the lab's second disk here.
+data_disk:
+  device: /dev/vdb
+  mount_point: /data
+  fstype: ext4
+  opts: defaults

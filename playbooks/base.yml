@@ -1,0 +1,241 @@
+---
+# The host underneath k3s, made to look like a Heap node on 2026-11-16.
+#
+# First the cluster-config roles that configure.yml runs on Heap and that
+# make sense on a VM (from HEAP_REPO/roles; scripts/play.sh sets the path).
+# Then the state Heap's hosts are in that no role describes: hand edits,
+# leftovers, drift. Each of those cites where it was seen.
+#
+# Left out, and why: users and svc-accts (real people's keys), sshd (its
+# AuthorizedKeysCommand would lock out Lima's user), ansible-pull, network
+# (writes netplan for Heap's NICs), nix, popular_software (virtualbox and
+# friends; minutes of apt for nothing k3s touches), motd, gpu, monitoring.
+
+- name: Prepare apt
+  hosts: cluster
+  become: true
+  gather_facts: false
+  tasks:
+    # Background apt holds the dpkg lock during first boot and, later, would
+    # upgrade packages under a drill. Heap runs unattended-upgrades; the lab
+    # doesn't, so a snapshot stays the same snapshot. OS upgrades get drilled
+    # on purpose (README, "Drills").
+    - name: Stop background apt
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop: [apt-daily.timer, apt-daily-upgrade.timer, unattended-upgrades.service]
+      failed_when: false
+
+    - name: Wait for the dpkg lock rather than fail on it
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/99heap-lab
+        content: |
+          DPkg::Lock::Timeout "300";
+          Acquire::Retries "5";
+        mode: "0644"
+
+    - name: Refresh apt lists
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: NFS client everywhere, as on Heap
+      ansible.builtin.apt:
+        name: [nfs-common, rsync, jq]
+        state: present
+
+# broome's /data disk has to exist before roles/nfs_server runs. That role
+# formats the whole device and then partitions it, which only works on a disk
+# that's already partitioned (as sdb is). So: partition and format here.
+- name: broome's data disk, as sdb is on Heap
+  hosts: broome.heap-lab
+  become: true
+  gather_facts: false
+  tasks:
+    - name: GPT label with one partition
+      community.general.parted:
+        device: /dev/vdb
+        number: 1
+        label: gpt
+        state: present
+
+    - name: ext4 on vdb1
+      community.general.filesystem:
+        dev: /dev/vdb1
+        fstype: ext4
+
+- name: configure.yml's roles, on every node
+  hosts: cluster
+  become: true
+  roles:
+    # Role params beat the role's vars/main.yml; the lab subnet stands in for
+    # the cluster /27. The other RC networks stay as they are and never send
+    # anything here.
+    - { role: firewall, cluster_network: "{{ lab_subnet }}" }
+    - fail2ban
+    - host
+    - env
+    - metrics
+    - oomd
+
+- name: configure.yml's NFS server play
+  hosts: broome.heap-lab
+  become: true
+  roles:
+    - nfs_server
+
+- name: Heap's hand edits and leftovers
+  hosts: cluster
+  become: true
+  tasks:
+    # findings 2026-11-13: swap on everywhere, 4-8 GB, /swap.img.
+    - name: Swap file
+      ansible.builtin.command: >-
+        bash -c 'fallocate -l {{ lookup("env", "LAB_SWAP_MB") }}M /swap.img &&
+        chmod 600 /swap.img && mkswap /swap.img'
+      args:
+        creates: /swap.img
+
+    - name: Swap in fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "/swap.img\tnone\tswap\tsw\t0\t0"
+
+    - name: Swap on
+      ansible.builtin.command: swapon -a
+      changed_when: false
+
+    # broome resolves to 127.0.0.1 on broome (the host role's FQDN line), and
+    # to its address elsewhere: a hand-added /etc/hosts line on mercer, the
+    # search domain on greene and crosby. One /etc/hosts block plays both.
+    - name: Name the other nodes
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} heap-lab nodes"
+        block: |
+          {% for n, ip in lab_ips.items() if n != inventory_hostname_short %}
+          {{ ip }}	{{ n }}.{{ lab_domain }} {{ n }}
+          {% endfor %}
+
+    - name: /etc/cni/net.d, which podman created on Heap
+      ansible.builtin.file:
+        path: /etc/cni/net.d
+        state: directory
+        mode: "0755"
+      when: inventory_hostname_short in ['greene', 'broome']
+
+    # findings 2026-11-13: podman's conflist on greene, mercer and broome.
+    - name: podman's CNI config
+      ansible.builtin.copy:
+        dest: /etc/cni/net.d/87-podman-bridge.conflist
+        content: |
+          {"cniVersion": "0.4.0", "name": "podman", "plugins": [{"type": "bridge", "bridge": "cni-podman0", "isGateway": true, "ipMasq": true, "ipam": {"type": "host-local", "routes": [{"dst": "0.0.0.0/0"}], "ranges": [[{"subnet": "10.88.0.0/16", "gateway": "10.88.0.1"}]]}}, {"type": "portmap", "capabilities": {"portMappings": true}}]}
+        mode: "0644"
+      when: inventory_hostname_short in ['greene', 'broome']
+
+# findings 2026-11-13: Calico's conflist and kubeconfig still in broome's
+# /etc/cni/net.d, setuid calico binaries in /opt/cni/bin on broome and greene.
+# Harmless to the old cluster (k3s v1.31 reads its own CNI dir); the new one
+# reads /etc/cni/net.d, so this is where a wrong sort order would show.
+- name: Calico leftovers
+  hosts: greene.heap-lab:broome.heap-lab
+  become: true
+  tasks:
+    - name: /etc/cni/net.d and /opt/cni/bin
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: [/etc/cni/net.d, /opt/cni/bin]
+
+    - name: Calico's conflist and kubeconfig (broome)
+      ansible.builtin.copy:
+        dest: "/etc/cni/net.d/{{ item.name }}"
+        content: "{{ item.content }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - name: 10-calico.conflist
+          mode: "0644"
+          content: |
+            {"name": "k8s-pod-network", "cniVersion": "0.3.1", "plugins": [{"type": "calico", "datastore_type": "kubernetes", "nodename": "broome", "mtu": 0, "ipam": {"type": "calico-ipam"}, "policy": {"type": "k8s"}, "kubernetes": {"kubeconfig": "/etc/cni/net.d/calico-kubeconfig"}}, {"type": "portmap", "snat": true, "capabilities": {"portMappings": true}}, {"type": "bandwidth", "capabilities": {"bandwidth": true}}]}
+        - name: calico-kubeconfig
+          mode: "0600"
+          content: |
+            # Stale since 2025-03; points at a cluster that no longer exists.
+            apiVersion: v1
+            kind: Config
+            clusters: [{name: local, cluster: {server: "https://10.43.0.1:443", insecure-skip-tls-verify: true}}]
+      when: inventory_hostname_short == 'broome'
+
+    - name: setuid calico binaries (inert stand-ins)
+      ansible.builtin.copy:
+        dest: "/opt/cni/bin/{{ item }}"
+        content: "#!/bin/sh\necho 'heap-lab stand-in for a 2025 calico binary' >&2\nexit 1\n"
+        mode: "04755"
+      loop: [calico, calico-ipam]
+
+- name: The other nodes mount broome's /data
+  hosts: cluster:!broome.heap-lab
+  become: true
+  tasks:
+    # Evelyn's hand-edited fstab lines (2026-11-11): hard mounts, over IPv6 on
+    # Heap. The lab is IPv4-only. k3s-teardown.yml copies volumes here.
+    - name: NFS mount of broome:/data
+      ansible.posix.mount:
+        path: /data
+        src: "broome.{{ lab_domain }}:/data"
+        fstype: nfs
+        opts: defaults,hard
+        state: mounted
+
+# findings 2026-11-13: ufw drift. broome, mercer and crosby also allow
+# 10.0.0.0/16, 23.136.216.0/24 and 443 from anywhere; broome 1022 too. greene
+# has none of it. Ansible only adds rules, so nothing ever removed these.
+- name: ufw drift
+  hosts: crosby.heap-lab:broome.heap-lab
+  become: true
+  tasks:
+    - name: Hand-added rules
+      community.general.ufw:
+        rule: allow
+        src: "{{ item.src | default(omit) }}"
+        port: "{{ item.port | default(omit) }}"
+        proto: "{{ 'tcp' if item.port is defined else omit }}"
+      loop:
+        - { src: 10.0.0.0/16 }
+        - { src: 23.136.216.0/24 }
+        - { port: "443" }
+
+    - name: broome's 1022
+      community.general.ufw:
+        rule: allow
+        port: "1022"
+        proto: tcp
+      when: inventory_hostname_short == 'broome'
+
+- name: Seed /data
+  hosts: broome.heap-lab
+  become: true
+  gather_facts: false
+  tasks:
+    # The shape heap-check.sh's baseline counts: 12 top-level entries, 73 in
+    # archive/. Every file is small and known, so scripts/data.sh can prove
+    # later that nothing under /data changed.
+    - name: Seed once
+      ansible.builtin.shell: |
+        set -eu
+        cd /data
+        for d in archive minecraft k8s-storage ab amy atty evelyn florian gareth piya trey; do mkdir -p "$d"; done
+        mkdir -p k8s-storage/crosby-rancher k8s-storage/mercer-rancher
+        for i in $(seq -w 1 73); do
+          mkdir -p "archive/recurser-$i"
+          echo "archived home $i" > "archive/recurser-$i/notes.txt"
+          head -c 65536 /dev/urandom > "archive/recurser-$i/blob.bin"
+        done
+        chmod -R u=rwX,go=rX archive
+        echo "level-name=world" > minecraft/server.properties
+        touch /data/.heap-lab-seeded
+      args:
+        creates: /data/.heap-lab-seeded

@@ -1,0 +1,184 @@
+# Stand-ins for what the old cluster runs that the migration has to get past.
+# Each one names the thing in heap-inventory.md it imitates. Small images,
+# multi-arch, with known bytes on every volume so copies can be checked.
+#
+#   local-path volumes on greene and broome  -> k3s-teardown.yml copies them
+#   ray-pv: all of broome:/data over NFS,     -> the loopback NFS mount under
+#           server "broome", pod on broome       /var/lib/kubelet on broome
+#   gpu-feature-discovery's subPath of /etc  -> bind mounts under kubelet
+#   an Ingress on traefik via servicelb      -> 80/443 held on every node
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: michael}
+---
+# michael/data-concourse-postgresql-0 on greene, 77M on Heap.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: concourse-postgresql, namespace: michael}
+spec:
+  serviceName: concourse-postgresql
+  replicas: 1
+  selector: {matchLabels: {app: concourse-postgresql}}
+  template:
+    metadata: {labels: {app: concourse-postgresql}}
+    spec:
+      nodeSelector: {kubernetes.io/hostname: greene}
+      containers:
+        - name: postgres
+          image: busybox:1.37
+          command: [sh, -c, 'test -f /data/seed || { head -c 4194304 /dev/urandom > /data/base.bin; echo concourse > /data/seed; }; while true; do date +%s > /data/last-write; sleep 5; done']
+          volumeMounts: [{name: data, mountPath: /data}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources: {requests: {storage: 1Gi}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: jupyterhub}
+---
+# jupyterhub/hub-db-dir on broome: the hub's sqlite, 1.1M on Heap.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: hub-db-dir, namespace: jupyterhub}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: hub, namespace: jupyterhub}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: hub}}
+  template:
+    metadata: {labels: {app: hub}}
+    spec:
+      nodeSelector: {kubernetes.io/hostname: broome}
+      containers:
+        - name: hub
+          image: busybox:1.37
+          command: [sh, -c, 'test -f /srv/jupyterhub/jupyterhub.sqlite || head -c 1153434 /dev/urandom > /srv/jupyterhub/jupyterhub.sqlite; mkdir -p /www; echo hub > /www/index.html; httpd -f -p 8081 -h /www']
+          ports: [{containerPort: 8081}]
+          volumeMounts: [{name: db, mountPath: /srv/jupyterhub}]
+      volumes:
+        - name: db
+          persistentVolumeClaim: {claimName: hub-db-dir}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: hub, namespace: jupyterhub}
+spec:
+  selector: {app: hub}
+  ports: [{port: 80, targetPort: 8081}]
+---
+# hub-ingress, on the old cluster's only IngressClass.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: hub-ingress, namespace: jupyterhub}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: jupyter.recurse.cloud
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: hub, port: {number: 80}}}}
+---
+# A user server's home on greene (claim-trey-lawrence, 180K on Heap).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: claim-trey-lawrence---d4c4fe9c, namespace: jupyterhub}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: seed-trey, namespace: jupyterhub}
+spec:
+  template:
+    spec:
+      nodeSelector: {kubernetes.io/hostname: greene}
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: busybox:1.37
+          command: [sh, -c, 'mkdir -p /home/jovyan/work && head -c 184320 /dev/urandom > /home/jovyan/work/notebook.ipynb']
+          volumeMounts: [{name: home, mountPath: /home/jovyan}]
+      volumes:
+        - name: home
+          persistentVolumeClaim: {claimName: claim-trey-lawrence---d4c4fe9c}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: ray-system}
+---
+# ray-pv: all of broome:/data, server name "broome", which is 127.0.0.1 on
+# broome. The only NFS mount under /var/lib/kubelet on Heap (R-M4).
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: ray-pv}
+spec:
+  capacity: {storage: 9Ti}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef: {namespace: ray-system, name: ray-pvc}
+  nfs: {server: broome, path: /data}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: ray-pvc, namespace: ray-system}
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: ray-pv
+  resources: {requests: {storage: 9Ti}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: rc-ray-head, namespace: ray-system}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: ray-head}}
+  template:
+    metadata: {labels: {app: ray-head}}
+    spec:
+      nodeSelector: {kubernetes.io/hostname: broome}
+      containers:
+        - name: ray-head
+          image: busybox:1.37
+          command: [sh, -c, 'ls /data > /dev/null; sleep infinity']
+          volumeMounts: [{name: data, mountPath: /data, readOnly: true}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: ray-pvc}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: gpu-operator}
+---
+# gpu-feature-discovery mounts host /etc by subPath, which leaves a bind
+# mount under /var/lib/kubelet/pods/*/volume-subpaths on every node it runs.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: gpu-feature-discovery, namespace: gpu-operator}
+spec:
+  selector: {matchLabels: {app: gpu-feature-discovery}}
+  template:
+    metadata: {labels: {app: gpu-feature-discovery}}
+    spec:
+      containers:
+        - name: gfd
+          image: busybox:1.37
+          command: [sh, -c, 'cat /etc-host/os-release > /dev/null; sleep infinity']
+          volumeMounts: [{name: host-root, mountPath: /etc-host, subPath: etc, readOnly: true}]
+      volumes:
+        - name: host-root
+          hostPath: {path: /}

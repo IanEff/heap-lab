@@ -1,0 +1,149 @@
+---
+# Heap's old state, as found on 2026-11-13 and 2026-11-16:
+#   broome  k3s v1.31.2 server, sqlite, --flannel-backend=vxlan, the bundled
+#           traefik, servicelb and local-path
+#   greene  k3s v1.31.6 agent with the old role's GPU labels
+#   crosby  outside the old cluster: Atty's standalone v1.36.6 cluster-init
+#           with Cilium 1.20.4 from Helm, containerd bind-mounted from /home
+#
+# The install commands are the ones master's roles/k3s used (git show
+# master:roles/k3s/tasks/head.yaml, worker.yaml), with versions pinned:
+# the old worker install had none and took whatever was stable that day.
+# crosby's flags are reconstructed from the 2026-11-16 scan; Atty's exact
+# command isn't recorded.
+
+- name: broome, the old server
+  hosts: old_server
+  become: true
+  tasks:
+    - name: Install k3s as master's head.yaml did
+      ansible.builtin.shell: >-
+        curl -sfL https://get.k3s.io |
+        INSTALL_K3S_VERSION={{ lookup('env', 'OLD_K3S_SERVER') }}
+        INSTALL_K3S_EXEC="server --flannel-backend=vxlan" sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for the node token
+      ansible.builtin.wait_for:
+        path: /var/lib/rancher/k3s/server/node-token
+        timeout: 300
+
+    - name: Read the node token
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: node_token
+
+    - name: Wait for the API
+      ansible.builtin.command: /usr/local/bin/k3s kubectl get --raw /readyz
+      register: readyz
+      until: readyz.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+
+- name: greene, an old agent
+  hosts: old_agents
+  become: true
+  vars:
+    old_token: "{{ hostvars[groups['old_server'][0]]['node_token']['content'] | b64decode | trim }}"
+  tasks:
+    - name: Install k3s as master's worker.yaml did
+      ansible.builtin.shell: >-
+        curl -sfL https://get.k3s.io |
+        INSTALL_K3S_VERSION={{ lookup('env', 'OLD_K3S_AGENT') }}
+        INSTALL_K3S_EXEC='agent
+        --node-label gpu=true
+        --node-label node.kubernetes.io/instance-type=gpu'
+        K3S_URL=https://{{ groups['old_server'][0] }}:6443
+        K3S_TOKEN={{ old_token }}
+        sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: The config directory worker.yaml created afterwards
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: "0755"
+
+    - name: The agent config worker.yaml wrote afterwards
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        content: |
+          # Let k3s auto-detect the NVIDIA runtime
+          snapshotter: overlayfs
+        mode: "0644"
+      register: agent_config
+
+    - name: Restart the agent for it, as worker.yaml's handler did
+      ansible.builtin.systemd:
+        name: k3s-agent
+        state: restarted
+      when: agent_config.changed
+
+- name: crosby, Atty's experiment
+  hosts: experiment
+  become: true
+  vars:
+    containerd_dir: /var/lib/rancher/k3s/agent/containerd
+  tasks:
+    # The deleted bindmount role's work, as an fstab line (crosby's line 14).
+    - name: Directories for the containerd bind mount
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop: [/home/k3s-containerd, "{{ containerd_dir }}"]
+
+    - name: Bind-mount containerd's store from /home
+      ansible.posix.mount:
+        path: "{{ containerd_dir }}"
+        src: /home/k3s-containerd
+        fstype: none
+        opts: bind
+        state: mounted
+
+    - name: /etc/rancher/k3s
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: "0755"
+
+    - name: Atty's k3s config (reconstructed)
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        content: |
+          cluster-init: true
+          flannel-backend: none
+          disable-network-policy: true
+          disable: [traefik, servicelb]
+          cluster-cidr: 10.44.0.0/16
+          service-cidr: 10.45.0.0/16
+          cluster-dns: 10.45.0.10
+          write-kubeconfig-mode: "0644"
+        mode: "0644"
+
+    - name: Install k3s v1.36.6 by hand
+      ansible.builtin.shell: >-
+        curl -sfL https://get.k3s.io |
+        INSTALL_K3S_VERSION={{ lookup('env', 'EXPERIMENT_K3S') }} sh -s - server
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for the API
+      ansible.builtin.command: /usr/local/bin/k3s kubectl get --raw /readyz
+      register: readyz
+      until: readyz.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+
+    # Seen 2026-11-16: `Anywhere on lxc+ ALLOW 10.44.0.0/16`. Runbook step 3.4
+    # deletes it.
+    - name: Atty's hand-added ufw rule
+      community.general.ufw:
+        rule: allow
+        interface: lxc+
+        direction: in
+        src: 10.44.0.0/16

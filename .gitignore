@@ -1,0 +1,7 @@
+.state/
+.cache/
+.snapshots/
+.task/
+.env
+.DS_Store
+.*.log

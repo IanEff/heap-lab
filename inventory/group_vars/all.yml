@@ -1,0 +1,14 @@
+---
+# Connection: scripts/ssh_config.sh writes .state/ssh_config from Lima's own.
+ansible_ssh_common_args: "-F {{ lookup('env', 'LAB_ROOT') }}/.state/ssh_config"
+
+# What cluster-config's inventory/hosts sets in [all:vars].
+extra_path_dirs: ""
+ld_library_path_dirs: ""
+
+lab_domain: "{{ lookup('env', 'LAB_DOMAIN') }}"
+lab_subnet: "{{ lookup('env', 'LAB_SUBNET_PREFIX') }}.0/24"
+lab_ips:
+  greene: "{{ lookup('env', 'LAB_IP_GREENE') }}"
+  crosby: "{{ lookup('env', 'LAB_IP_CROSBY') }}"
+  broome: "{{ lookup('env', 'LAB_IP_BROOME') }}"

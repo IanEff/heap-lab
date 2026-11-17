@@ -1,0 +1,5 @@
+---
+k3s_node_ip: "{{ lookup('env', 'LAB_IP_CROSBY') }}"
+# As on Heap: containerd's store bind-mounted from /home. On Heap /home is a
+# separate LV; here it's the root disk, which doesn't change the mount logic.
+k3s_containerd_bind_source: /home/k3s-containerd

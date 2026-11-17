@@ -1,0 +1,10 @@
+---
+# Site values that cluster-config keeps in inventory/group_vars/k3s_cluster/.
+# Not a secret: these VMs live on a laptop.
+k3s_token: heap-lab-token-0123456789abcdef0123456789abcdef
+k3s_api_dns: "k8s.{{ lab_domain }}"
+
+# Heap holds back 6-10Gi per node. Scaled to 4GiB VMs; the one deliberate
+# change to the role's behaviour. See README, "What isn't true to Heap".
+k3s_system_reserved_memory: 512Mi
+k3s_eviction_hard_memory: 100Mi

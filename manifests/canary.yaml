@@ -1,0 +1,75 @@
+# The lab's instrument, not a Heap workload. A writer stamps the time into a
+# shared volume every second; two web pods on different nodes serve that
+# stamp through the cluster's default IngressClass at canary.recurse.cloud.
+# scripts/watch.sh asks every node for it, so one probe covers ingress, the
+# pod network, Services and NFS freshness. Deployed by `task canary`.
+apiVersion: v1
+kind: Namespace
+metadata: {name: lab-canary}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: heartbeat, namespace: lab-canary}
+spec:
+  accessModes: [ReadWriteMany]
+  ${CANARY_STORAGE}
+  resources: {requests: {storage: 64Mi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: writer, namespace: lab-canary}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: writer}}
+  template:
+    metadata: {labels: {app: writer}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: writer
+          image: busybox:1.37
+          command: [sh, -c, 'while true; do date +%s > /hb/.t && mv /hb/.t /hb/heartbeat; sleep 1; done']
+          volumeMounts: [{name: hb, mountPath: /hb}]
+      volumes:
+        - {name: hb, persistentVolumeClaim: {claimName: heartbeat}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web, namespace: lab-canary}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: web}}
+  template:
+    metadata: {labels: {app: web}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: web}}}
+      containers:
+        - name: web
+          image: busybox:1.37
+          command: [httpd, -f, -p, "8080", -h, /hb]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /heartbeat, port: 8080}, periodSeconds: 2}
+          volumeMounts: [{name: hb, mountPath: /hb, readOnly: true}]
+      volumes:
+        - {name: hb, persistentVolumeClaim: {claimName: heartbeat}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web, namespace: lab-canary}
+spec:
+  selector: {app: web}
+  ports: [{port: 80, targetPort: 8080}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: web, namespace: lab-canary}
+spec:
+  ${CANARY_INGRESS_CLASS}
+  rules:
+    - host: canary.recurse.cloud
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}

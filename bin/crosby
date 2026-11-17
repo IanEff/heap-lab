@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# kubectl against crosby: Atty's experiment in the old stage, a server after.
+exec env KUBECONFIG="$(cd "$(dirname "$0")/.." && pwd)/.state/kube/crosby.yaml" kubectl "$@"

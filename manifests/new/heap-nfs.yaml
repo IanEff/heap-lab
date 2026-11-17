@@ -1,0 +1,20 @@
+# R-S2's StorageClass. Argo CD owns this once the config repo exists
+# (platform/csi-driver-nfs); until then the lab applies it. Server is
+# broome's address, as on Heap (23.136.216.133), not the name "broome".
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: heap-nfs
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: ${LAB_IP_BROOME}
+  share: /data/k8s
+  subDir: ${pvc.metadata.namespace}/${pvc.metadata.name}
+  onDelete: archive
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+mountOptions:
+  - hard
+  - nfsvers=4.1
