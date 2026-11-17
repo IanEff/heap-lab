@@ -8,3 +8,8 @@ k3s_api_dns: "k8s.{{ lab_domain }}"
 # change to the role's behaviour. See README, "What isn't true to Heap".
 k3s_system_reserved_memory: 512Mi
 k3s_eviction_hard_memory: 100Mi
+
+# Logins through the real batchmate.id, with the client named in .env. Empty
+# client ID: OIDC off, as on Heap until its client is filled in.
+k3s_oidc_issuer: "{{ lookup('env', 'LAB_OIDC_ISSUER') }}"
+k3s_oidc_client_id: "{{ lookup('env', 'LAB_OIDC_KUBECTL_CLIENT_ID') }}"

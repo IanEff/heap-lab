@@ -83,6 +83,33 @@ tasks:
     desc: "cluster-config's heap-check.sh: task check -- baseline | clean greene | joined greene"
     cmds: ['scripts/check.sh {{.CLI_ARGS}}']
 
+  # ── heap-k8s, run against the lab ──────────────────────────────────────────
+  argo:
+    desc: "Phase 4: install Argo CD from HEAP_K8S (first run) or push its latest commit and refresh"
+    cmds: [scripts/argo.sh]
+
+  argo-status:
+    desc: Argo CD's Applications on the new cluster
+    silent: true
+    cmds: ['KUBECONFIG=.state/kube/new.yaml kubectl -n argocd get applications']
+
+  argo-ui:
+    desc: "Argo CD's UI on http://localhost:8080 until Ctrl-C (user admin; prints the password)"
+    interactive: true
+    cmds:
+      - "KUBECONFIG=.state/kube/new.yaml kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo"
+      - 'KUBECONFIG=.state/kube/new.yaml kubectl -n argocd port-forward svc/argocd-server 8080:80'
+
+  # ── Logins through batchmate.id ────────────────────────────────────────────
+  oidc:
+    desc: "batchmate.id logins: check the API servers (after task k3s), write .state/kube/login.yaml, configure Argo CD"
+    cmds: [scripts/oidc.sh]
+
+  whoami:
+    desc: "kubectl auth whoami as yourself, through batchmate.id (opens a browser the first time)"
+    interactive: true
+    cmds: ['KUBECONFIG=.state/kube/login.yaml kubectl auth whoami']
+
   # ── Instruments ────────────────────────────────────────────────────────────
   watch:
     desc: "Probe APIs and Ingress every second until Ctrl-C, then print outages. Run in its own terminal."

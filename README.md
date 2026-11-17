@@ -53,7 +53,8 @@ crosby's experiment is the weakest row. The scan recorded what Atty ended up wit
 | unattended-upgrades off | So a snapshot stays the same snapshot. OS upgrades get drilled deliberately. |
 | No public IPs or upstream filter | Ingress is tested from inside the lab, as the runbook does from broome. |
 | `/opt/cni/bin` holds only the inert calico stand-ins | Heap's broome and greene also have `bandwidth`, `flannel`, `host-local`, `loopback`, `portmap` and `tuning` there from 2025. Not copied: a fake `loopback` would break what a real one makes work. |
-| No Argo CD yet | The config repo doesn't exist. Until it does, the new stage installs csi-driver-nfs 4.13.6 and StorageClass `heap-nfs` (R-S2) with Helm from `scripts/addons.sh`. |
+| Argo CD syncs a copy of heap-k8s, served from broome | `task argo` clones `HEAP_K8S` (`IanEff/heap-k8s` for now), swaps three values (the repo's own URL, `heap-nfs`'s NFS server, Prometheus's node targets, with mercer's dropped), commits that on top and serves it from broome on 8418, the lab's own git server. It stops if a Heap address is left in anything Argo CD applies. Nothing else changes, and `bootstrap/bootstrap.sh` runs as written. `task up STAGE=new` still installs csi-driver-nfs with Helm from `scripts/addons.sh`; don't run both. |
+| No sealed secrets, no Cloudflare token, no Dex app | Grafana waits for `grafana-admin` and the ClusterIssuer can't solve DNS01, as on a fresh Heap until someone seals them. Argo CD's login is `admin`. |
 
 ## What has been run (2026-11-17)
 
@@ -73,11 +74,21 @@ These came out of the runs above. The lab doesn't work around them; they're for 
 
 1. **heap-check.sh can't read crosby's `/etc/cni/net.d`.** Cilium created the directory as 0700 (no podman conflist made it first on crosby), and the check runs `ls` without sudo, so two `joined` checks fail on crosby with "Permission denied". The real crosby probably has the same mode. The checks pass when run with sudo by hand.
 2. **The node goes Ready before Cilium exists.** On greene, k3s v1.36 marked the node Ready about 6 s after starting, because containerd accepts podman's `87-podman-bridge.conflist` in `/etc/cni/net.d`. Pods scheduled in that window fail sandbox creation (no `bridge` plugin in `/opt/cni/bin`, here or on Heap) and wait for Cilium, so no pod landed on podman's network. Anything that waits for Ready, such as a check or the role, is waiting for the wrong thing.
-3. **crosby's teardown left no Cilium interfaces.** `cilium_host`, `cilium_net`, the `CILIUM_` chains and the tc programs were all gone after `k3s-teardown.yml`, with no reboot. The vault's 2026-11-16 note says killall leaves them behind. Seen once; I don't know which step removed them. The installer script doesn't mention Cilium. Worth looking at on the real crosby at card step c.
+3. **crosby's teardown leaves Cilium interfaces only some of the time.** On the first run `cilium_host`, `cilium_net`, the `CILIUM_` chains and the tc programs were all gone after `k3s-teardown.yml`, with no reboot. On the second (2026-11-17, 12:10) `cilium_host`, `cilium_net` and `cilium_vxlan` were still there, as the vault's 2026-11-16 note says. Plan on the 3.3 reboot.
 4. **prometheus.prometheus 0.27.0**, pinned in `requirements.yml`, refuses to install on ansible-core above 2.18, and its `_common` role fails on 2.19+'s strict conditionals. Anyone running `configure.yml` from a current laptop hits this. The lab installs it anyway and relaxes conditionals for `base.yml` only.
 5. **roles/nfs_server** formats the whole device and then partitions it, so it fails on a blank disk. Harmless on Heap, where sdb already has a partition.
+6. **`heap-check clean` fails on crosby after the 3.3 reboot.** fstab line 14 bind-mounts `/home/k3s-containerd` back over `/var/lib/rancher/k3s/agent/containerd` at boot, so "nothing mounted under k3s's directories" lists it. The teardown allowlists that target and the runbook's crosby table expects the mount (P-9), so card step c can't pass on crosby as written. mercer has the same line. The lab's `card.sh` stops there; on 2026-11-17 crosby's card was finished by hand from step d.
+
+## Findings for heap-k8s
+
+From the first `task argo`, 2026-11-17, against `IanEff/heap-k8s` at 66b7a83. Both stop a fresh bootstrap on Heap too. The lab unblocked them by hand on the live cluster (snapshot `new-argo` has both); the repo is unchanged.
+
+1. **The root app deadlocks on its first sync.** `platform/argocd` is wave -3 and uses project `platform`; `projects/*.yaml` have no wave, so they're wave 0. With the Application health check in `argocd-cm`, root waits for `argocd` to be healthy, and it can't be while its project doesn't exist ("Application referencing project platform which does not exist"). Fix: `argocd.argoproj.io/sync-wave: "-4"` on both AppProjects. The lab applied `projects/` with kubectl.
+2. **Every Ingress stays Progressing.** Cilium's ingress on the host network never fills in `status.loadBalancer`, and Argo CD's built-in Ingress health check waits for it. `argocd-server`'s Ingress kept `platform/argocd` Progressing, which blocked root again at wave -3, and any community app with an Ingress would never go Healthy. Fix: a `resource.customizations.health.networking.k8s.io_Ingress` check in `platform/argocd/values.yaml` that returns Healthy. The lab patched that key into the live `argocd-cm`; `platform/argocd` is manual sync, so nothing reverts it.
 
 ## Known issues
+
+- **Fix for the egress outages below:** stop all three VMs so `limactl usernet` exits, then start them (`task snap` does both). On 2026-11-17 the outage ran past 25 minutes and took guest-to-Mac traffic down with it; a restart of usernet cleared it at once. Its outbound connections were leaving from ProtonVPN's tunnel address (10.2.0.2).
 
 - **Egress through Lima's user-v2 NAT drops for minutes at a time.** Three windows on 2026-11-17, two of them starting right after a snapshot restarted the VMs; the longest ran about ten minutes. `get.k3s.io` and docker.io timed out from every node at once (18 of 20 tries failing), while the Mac reached both 60 of 60 times. A k3s.yml run inside the window fails at the installer download; rerun it. `up` and `snap` now wait until every node gets three answers in a row before handing back. The cause isn't known; the Mac had Tailscale and ProtonVPN up. A pull-through cache on the Mac (galley's) would take the image pulls off this path, and is the next thing to add.
 - **pod CIDR traffic to the gateway.** While a node has no Cilium (crosby between its join and its agent starting), its API server's calls to pod IPs on other nodes go to the default gateway, and Lima's NAT tries to carry them out through the Mac. On Heap they'd die at the upstream router. Harmless, but it shows up as SYN_SENT sockets in `limactl usernet`.
@@ -152,6 +163,7 @@ Bump `k3s_cilium_version` (or change `k3s_cilium_values`) in the checkout and ru
 | `task card NODE=` | The runbook's node card |
 | `task check -- baseline\|clean N\|joined N` | cluster-config's `heap-check.sh`, pointed at the lab |
 | `task play -- <playbook> <args>` | Any playbook from `playbooks/` or the checkout |
+| `task argo` / `task argo-status` / `task argo-ui` | Phase 4 from `HEAP_K8S`: bootstrap Argo CD, or push the repo's latest commit and refresh; list Applications; the UI on localhost:8080 |
 | `task watch` | Disruption probe until Ctrl-C, then outages per target |
 | `task canary [CLUSTER=new\|old\|delete-new\|delete-old]` | The probe's target app |
 | `task data-check` / `task data-record` | `/data` unchanged since the baseline |
