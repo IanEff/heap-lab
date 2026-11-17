@@ -6,11 +6,12 @@
 #   1. checks both servers carry the role's authentication config;
 #   2. writes .state/kube/login.yaml, a kubeconfig whose user is kubelogin, with
 #      its token cache under .state/ (nothing in ~/.kube);
-#   3. gives Argo CD batchmate.id as its OIDC provider.
+#   3. gives Argo CD batchmate.id as its OIDC provider;
+#   4. makes LAB_OIDC_ADMINS admins in both (see step 4).
 # Step 3 patches the running Argo CD rather than heap-k8s: on Heap the same
 # settings belong in heap-k8s's platform/argocd/values.yaml. Argo CD's own
 # Application syncs by hand, so nothing reverts the patch until someone syncs it.
-# Grants nothing: a login proves who someone is; RBAC is separate.
+# Apart from step 4, grants nothing: a login proves who someone is.
 set -euo pipefail
 _TAG=oidc
 # shellcheck source=lib.sh
@@ -107,6 +108,44 @@ new_kubectl -n argocd patch configmap argocd-cm --type merge -p "$(
 )" >/dev/null
 new_kubectl -n argocd rollout restart deployment argocd-server >/dev/null
 new_kubectl -n argocd rollout status deployment argocd-server --timeout=180s
+
+# ── 4. Admins (the lab's own instrument) ────────────────────────────────────
+# LAB_OIDC_ADMINS: subjects as Argo CD sees them, space-separated. The gateway's
+# sub_… today; the RC id once batchmate.id sends federated_claims. Kubernetes
+# usernames follow the role's CEL rule: sub_… is batchmate:sub_…, a number is
+# rc:<id>. Each run rewrites both grants whole, so a name dropped from the list
+# loses access; an empty list removes both. On Heap these belong in heap-k8s.
+step "Admins: ${LAB_OIDC_ADMINS:-none}"
+kube_user() { case "$1" in sub_*) echo "batchmate:$1" ;; *[!0-9]*|'') error "Can't map subject '$1' (want sub_… or an RC id)" ;; *) echo "rc:$1" ;; esac; }
+read -r -a ADMINS <<< "${LAB_OIDC_ADMINS:-}"
+
+if [ "${#ADMINS[@]}" -gt 0 ]; then
+    SUBJECTS=$(for s in "${ADMINS[@]}"; do kube_user "$s"; done \
+        | jq -R '{kind: "User", apiGroup: "rbac.authorization.k8s.io", name: .}' | jq -s .)
+    jq -n --argjson subjects "$SUBJECTS" '{
+        apiVersion: "rbac.authorization.k8s.io/v1", kind: "ClusterRoleBinding",
+        metadata: {name: "heap-lab-oidc-admins", labels: {"heap-lab/instrument": "oidc-admins"}},
+        roleRef: {apiGroup: "rbac.authorization.k8s.io", kind: "ClusterRole", name: "cluster-admin"},
+        subjects: $subjects}' | new_kubectl apply -f - >/dev/null
+else
+    new_kubectl delete clusterrolebinding heap-lab-oidc-admins --ignore-not-found >/dev/null
+fi
+
+BEGIN='# heap-lab: LAB_OIDC_ADMINS begin (scripts/oidc.sh rewrites this block)'
+END='# heap-lab: LAB_OIDC_ADMINS end'
+CSV=$(new_kubectl -n argocd get configmap argocd-rbac-cm -o jsonpath='{.data.policy\.csv}' \
+    | awk -v b="$BEGIN" -v e="$END" '$0==b{skip=1} !skip{print} $0==e{skip=0}')
+if [ "${#ADMINS[@]}" -gt 0 ]; then
+    # Comments on their own lines: Casbin reads a trailing "# ..." as part of the role.
+    CSV="${CSV}
+${BEGIN}
+$(for s in "${ADMINS[@]}"; do echo "g, ${s}, role:admin"; done)
+${END}"
+fi
+new_kubectl -n argocd patch configmap argocd-rbac-cm --type merge -p "$(
+    jq -n --arg c "${CSV}
+" '{data: {"policy.csv": $c}}')" >/dev/null
+for s in "${ADMINS[@]}"; do info "admin: $(kube_user "$s") (Kubernetes), ${s} (Argo CD)"; done
 
 info "Done. kubectl as yourself:  KUBECONFIG=${LOGIN_KUBECONFIG#"${LAB_ROOT}/"} kubectl auth whoami"
 info "Argo CD:                    task argo-ui, then 'Log in via Recurse'"

@@ -4,7 +4,7 @@ heap-lab is three Lima VMs standing in for RC's Heap cluster, so cluster-config'
 
 ## Commands
 
-`task up [STAGE=old|new]` · `task status` · `task snap NAME=` · `task restore NAME=` · `task card NODE=` · `task k3s -- <args>` · `task watch` · `task destroy FORCE=1`. `task --list` for the rest. Inside the repo, direnv sets `KUBECONFIG`; `new`, `old` and `crosby` in `bin/` are kubectl per cluster.
+`task up [STAGE=old|new]` · `task status` · `task snap NAME=` · `task restore NAME=` · `task card NODE=` · `task k3s -- <args>` · `task watch` · `task oidc` · `task whoami` · `task destroy FORCE=1`. `task --list` for the rest. Login secrets live only in `.env`; never print them, never pass them on a command line. Inside the repo, direnv sets `KUBECONFIG`; `new`, `old` and `crosby` in `bin/` are kubectl per cluster.
 
 ## Invariants
 
