@@ -53,8 +53,8 @@ crosby's experiment is the weakest row. The scan recorded what Atty ended up wit
 | unattended-upgrades off | So a snapshot stays the same snapshot. OS upgrades get drilled deliberately. |
 | No public IPs or upstream filter | Ingress is tested from inside the lab, as the runbook does from broome. |
 | `/opt/cni/bin` holds only the inert calico stand-ins | Heap's broome and greene also have `bandwidth`, `flannel`, `host-local`, `loopback`, `portmap` and `tuning` there from 2025. Not copied: a fake `loopback` would break what a real one makes work. |
-| Argo CD syncs a copy of heap-k8s, served from broome | `task argo` clones `HEAP_K8S` (`IanEff/heap-k8s` for now), swaps three values (the repo's own URL, `heap-nfs`'s NFS server, Prometheus's node targets, with mercer's dropped), commits that on top and serves it from broome on 8418, the lab's own git server. It stops if a Heap address is left in anything Argo CD applies. Nothing else changes, and `bootstrap/bootstrap.sh` runs as written. `task up STAGE=new` still installs csi-driver-nfs with Helm from `scripts/addons.sh`; don't run both. |
-| No sealed secrets, no Cloudflare token | Grafana waits for `grafana-admin` and the ClusterIssuer can't solve DNS01, as on a fresh Heap until someone seals them. |
+| Argo CD syncs the lab's copy of heap-k8s, served from broome | `heap-k8s/` is a subset of recursecenter/heap-k8s at `HEAP_K8S_MIRRORED`: bootstrap, projects, `apps/_template`, and argocd, sealed-secrets, cert-manager, csi-driver-nfs and rbac under `platform/`. monitoring, nvidia-device-plugin and kuberay-operator are left out. Heap's values are placeholders, and four marked deltas make it go green: waves on the AppProjects and the Ingress health check (heap-k8s findings 1 and 2), the port-forward as Argo CD's `url`, and a self-signed `letsencrypt-prod`. `heap-k8s/README.md` has the list; `task argo-drift` shows the diff against upstream. `task argo` publishes it from broome on 8418, the lab's own git server, and stops if a Heap address is left in anything Argo CD applies. `task argo SOURCE=upstream` syncs all of upstream instead, with only its values swapped. `task up STAGE=new` still installs csi-driver-nfs with Helm from `scripts/addons.sh`; Argo CD adopts the release. |
+| No sealed secrets, no Cloudflare token | The lab's `heap-k8s/` has no monitoring and a self-signed issuer, so nothing waits on a secret. With `SOURCE=upstream`, Grafana waits for `grafana-admin` and the ClusterIssuer is Degraded, as on a fresh Heap until someone seals them (heap-k8s finding 5). |
 | Logins go through the real batchmate.id, with your own clients | There's nothing to stand in for: the API servers and Argo CD trust `https://batchmate.id` exactly as Heap will, so a login needs the internet and Chandler's gateway up. `task oidc` patches Argo CD's settings onto the live cluster and keeps its client secret in a Secret it creates from `.env`; heap-k8s carries the same settings and still has to seal that secret. Admins come from `LAB_OIDC_ADMINS`, the lab's own instrument; on Heap they belong in heap-k8s. |
 
 ## What has been run (2026-11-17)
@@ -68,6 +68,8 @@ Against cluster-config `k3s-ha-cilium` at `db38bb4`, uncommitted. Lima 2.2.1, an
 - Snapshot and restore: after deleting a namespace, adding a file on greene and changing a file in `/data`, restoring `old-fresh` took 2m05s and brought back all three. `task data-check` caught the `/data` change before the restore.
 
 - Logins through batchmate.id, against cluster-config `k3s-ha-cilium` at `2c6fe8f` plus the k3s role's OIDC change, uncommitted. `task k3s -l` on greene, then crosby, restarted each API server with `authentication-config`; v1 of `AuthenticationConfiguration` was accepted. `task whoami` came back `batchmate:sub_fbb0…` after a browser login. RBAC as that user: refused everything with no bindings; with `view` bound in `monitoring`, pods there yes, `kube-system`, Secrets and delete no; with cluster-admin, `can-i '*' '*'` yes. Argo CD's "Log in via Recurse" failed with `invalid_request` until `enablePKCEAuthentication` (finding 3 below), then worked. As `role:recurser` you can get and sync but not delete; `LAB_OIDC_ADMINS` makes you admin in both, and an empty list takes it away again. Snapshot `new-oidc`.
+
+- The lab's `heap-k8s/` (2026-11-18), mirroring recursecenter/heap-k8s at `74d7823`, published over the IanEff copy on snapshot `pre-lab-k8s`. heap-k8s's own `scripts/validate.sh` passed on the rendered tree. root went Synced and Healthy for the first time: monitoring, kuberay-operator and nvidia-device-plugin were pruned (Prometheus's and Grafana's volumes went to `/data/k8s/archived-monitoring`), `rbac` arrived at wave 0, and `letsencrypt-prod` went Ready. `platform/argocd` stays OutOfSync until its first manual sync (4.12): the diff is Argo CD's `tracking-id` annotation on every object bootstrap.sh's Helm install made, `oidc.config`'s comments, and `LAB_OIDC_ADMINS`'s line in `policy.csv`. 4.8 on upstream's StorageClass, which has no `nfsvers`: a PVC bound, mounted as NFS 4.2, wrote, and was archived when its namespace went.
 
 Not run yet: `task up STAGE=new` in one go (its pieces ran inside the migration), the k3s and Cilium upgrade drills, the OS upgrade drill.
 
@@ -90,6 +92,7 @@ From the first `task argo`, 2026-11-17, against `IanEff/heap-k8s` at 66b7a83. Bo
 2. **Every Ingress stays Progressing.** Cilium's ingress on the host network never fills in `status.loadBalancer`, and Argo CD's built-in Ingress health check waits for it. `argocd-server`'s Ingress kept `platform/argocd` Progressing, which blocked root again at wave -3, and any community app with an Ingress would never go Healthy. Fix: a `resource.customizations.health.networking.k8s.io_Ingress` check in `platform/argocd/values.yaml` that returns Healthy. The lab patched that key into the live `argocd-cm`; `platform/argocd` is manual sync, so nothing reverts it.
 3. **batchmate.id refuses any login without PKCE, confidential clients included.** Its `AuthorizationRequest` requires `code_challenge` with `S256`, so Argo CD's server-side login came back `invalid_request`. Argo CD 3.6 sends PKCE from the server only with `enablePKCEAuthentication: true` in `oidc.config`. Fixed in heap-k8s; Grafana (`use_pkce`), JupyterHub (`enable_pkce`) and Concourse's Dex will each need the same. kubelogin does it unasked.
 4. **Argo CD logs every user's claims.** argocd-server logs the whole id token at info on each API call: email, name, pronouns, picture. On Heap that's the email of every Recurser who logs in, in the pod's logs. Decide whether that's fine or lower the log level.
+5. **An unsealed secret stops every later wave.** Without `cloudflare-api-token-secret` the ClusterIssuer is Degraded ("failed to get secret"), so cert-manager is, and root never gets past wave -2. Without `grafana-admin`, monitoring does the same at wave -1. Either way `rbac` and `community-apps` (wave 0) are never applied, so kubectl logins see nothing and no community app syncs. Seen on the lab 2026-11-18. On Heap that makes 4.5's check ("root Synced, Healthy") wait for 4.7 and 4.11a, and both secrets have to be sealed before bootstrap or right after it. Moving `rbac` to an earlier wave would at least decouple logins.
 
 ## Findings for batchmate.id
 
@@ -163,6 +166,20 @@ Bump `k3s_cilium_version` (or change `k3s_cilium_values`) in the checkout and ru
 
 `task ssh NODE=crosby`, then `sudo apt-get update && sudo apt-get -y full-upgrade && sudo reboot`. The question is whether k3s, Cilium and ufw come back on the new kernel without help. Snapshot first.
 
+### 6. Phase 4 against the config repo
+
+```bash
+task restore NAME=new-oidc         # or any new-stage snapshot
+task argo                          # 4.4, 4.5: publish heap-k8s/, bootstrap or refresh
+task argo-status                   # root and every platform app Synced, Healthy
+task argo-ui                       # 4.12: sync argocd by hand; then task oidc puts your admin line back
+cp -R heap-k8s/apps/_template heap-k8s/apps/hello && task argo   # 4.14: app-hello appears
+rm -rf heap-k8s/apps/hello && task argo                          # app-hello and its namespace go
+task argo-drift                    # before trusting any of it: is heap-k8s/ still upstream?
+```
+
+`task argo` publishes the working tree, so an edit under `heap-k8s/` and a `task argo` is the lab's merge, and `git restore heap-k8s` (`git clean` for new files) with another `task argo` is the revert. 4.6 (the sealed-secrets key backup), 4.8 and the Phase 5 loop (5.a to 5.f, with the stand-ins under `manifests/old/` as the apps to move) run the same way. `task argo SOURCE=upstream` is the check that Heap's repo, as committed, would go green; until findings 1, 2 and 5 are fixed there, it won't.
+
 ## Tasks
 
 | Task | Does |
@@ -176,7 +193,8 @@ Bump `k3s_cilium_version` (or change `k3s_cilium_values`) in the checkout and ru
 | `task card NODE=` | The runbook's node card |
 | `task check -- baseline\|clean N\|joined N` | cluster-config's `heap-check.sh`, pointed at the lab |
 | `task play -- <playbook> <args>` | Any playbook from `playbooks/` or the checkout |
-| `task argo` / `task argo-status` / `task argo-ui` | Phase 4 from `HEAP_K8S`: bootstrap Argo CD, or push the repo's latest commit and refresh; list Applications; the UI on localhost:8080 |
+| `task argo [SOURCE=lab\|upstream]` / `task argo-status` / `task argo-ui` | Phase 4: publish `heap-k8s/` (or all of `HEAP_K8S`) from broome, then bootstrap Argo CD or refresh it; list Applications; the UI on localhost:8080 |
+| `task argo-drift` | `heap-k8s/` against `HEAP_K8S`: upstream commits since the mirror (fails if any), the diff, what's left out |
 | `task oidc` / `task whoami` | batchmate.id logins: check the API servers, write `.state/kube/login.yaml`, configure Argo CD, apply `LAB_OIDC_ADMINS`; `kubectl auth whoami` as yourself |
 | `task watch` | Disruption probe until Ctrl-C, then outages per target |
 | `task canary [CLUSTER=new\|old\|delete-new\|delete-old]` | The probe's target app |
@@ -210,10 +228,12 @@ inventory/               hosts.yml shaped like cluster-config's, group_vars, hos
 playbooks/base.yml       configure.yml's roles plus Heap's hand edits and leftovers
 playbooks/old.yml        the old cluster and crosby's experiment
 manifests/old/           old-cluster stand-ins; manifests/new/ heap-nfs; manifests/canary.yaml
+heap-k8s/                the lab's copy of the config repo, what task argo publishes (its README has the deltas)
 scripts/                 up, down, destroy, snap, play, card, check, watch, data, ...
 scripts/guest/probe.sh   the watch's broome side, fed over ssh
 bin/                     new, old, crosby: kubectl per cluster
-.state/                  ssh_config, kube/ (admin kubeconfigs, login.yaml, oidc-cache/), runs/, watch/, timeline.csv (gitignored)
+.state/                  ssh_config, kube/ (admin kubeconfigs, login.yaml, oidc-cache/), runs/, watch/, timeline.csv,
+                         heap-k8s*/ (what argo.sh last published; argo-drift's upstream clone) (gitignored)
 .snapshots/              whole-lab snapshots (gitignored; destroy removes them)
 .cache/collections/      cluster-config's Ansible collections (gitignored; kept)
 ```

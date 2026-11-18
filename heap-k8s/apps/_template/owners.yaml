@@ -1,0 +1,19 @@
+# Who can change things in this app's namespace with kubectl: exec into pods,
+# port-forward, delete a stuck pod, read Secrets. Everyone can already look.
+# Add yourself with the username `kubectl auth whoami` prints (batchmate:sub_...
+# today, rc:<RC id> once batchmate.id sends RC ids).
+#
+# Argo CD puts back anything that's in git, so a kubectl edit to a Deployment
+# lasts until the next sync. Fix it in a PR; use kubectl to look and to unstick.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: owners
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects: []
+#  - apiGroup: rbac.authorization.k8s.io
+#    kind: User
+#    name: batchmate:sub_0123456789abcdef0123456789abcdef

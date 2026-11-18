@@ -1,0 +1,17 @@
+# Every batchmate.id login carries the group batchmate:recursers (the API
+# server adds it; cluster-config's k3s role, k3s_oidc_groups_expression). Bound
+# to that group rather than system:authenticated, which also holds every
+# service account, so a pod can't use its own token to read the cluster.
+# view covers pods, logs, events, Deployments and the rest; never Secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: heap-recursers-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: batchmate:recursers

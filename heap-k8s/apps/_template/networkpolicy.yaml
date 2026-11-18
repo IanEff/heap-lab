@@ -1,0 +1,16 @@
+# Who can reach pods in this namespace: each other, Cilium's ingress (so an
+# Ingress works), and Prometheus. Outbound traffic isn't restricted.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: default
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEndpoints:
+        - {}
+    - fromEntities:
+        - ingress
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring

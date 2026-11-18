@@ -1,0 +1,22 @@
+# The plumbing everyone's apps run on. Cluster-scoped resources and CRDs are
+# allowed here and nowhere else.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  annotations:
+    # heap-lab: heap-k8s finding 1. Without a wave the project is wave 0, and
+    # root deadlocks at wave -3 on an argocd Application whose project
+    # doesn't exist yet.
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  description: Shared components under platform/
+  sourceRepos:
+    - "*"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"

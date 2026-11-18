@@ -8,9 +8,10 @@
 #      its token cache under .state/ (nothing in ~/.kube);
 #   3. gives Argo CD batchmate.id as its OIDC provider;
 #   4. makes LAB_OIDC_ADMINS admins in both (see step 4).
-# Step 3 patches the running Argo CD rather than heap-k8s: on Heap the same
-# settings belong in heap-k8s's platform/argocd/values.yaml. Argo CD's own
-# Application syncs by hand, so nothing reverts the patch until someone syncs it.
+# Step 3 patches the running Argo CD. The lab's heap-k8s/ carries the same url
+# and oidc.config, so syncing platform/argocd keeps them; SOURCE=upstream
+# doesn't, and a sync there reverts them. Either way a sync of platform/argocd
+# drops step 4's admin block from policy.csv: run this again after one.
 # Apart from step 4, grants nothing: a login proves who someone is.
 set -euo pipefail
 _TAG=oidc

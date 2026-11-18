@@ -1,0 +1,48 @@
+# One Application per directory under apps/, deployed to namespace app-<dir>.
+# Delete your directory and your app goes with it. Volumes on heap-nfs are
+# archived on broome rather than deleted, and `git revert` brings the app back.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: community-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: ${LAB_GIT_URL}
+        revision: main
+        directories:
+          - path: apps/*
+          - path: apps/_template
+            exclude: true
+  template:
+    metadata:
+      # Prefixed so a directory named, say, "argocd" can't replace a platform
+      # Application of the same name.
+      name: "app-{{.path.basename}}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: community
+      source:
+        repoURL: ${LAB_GIT_URL}
+        targetRevision: main
+        path: "{{.path.path}}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "app-{{.path.basename}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        managedNamespaceMetadata:
+          labels:
+            # Warn only: kubectl and Argo show what `restricted` would reject,
+            # and nothing is refused. R-G16 is still open.
+            pod-security.kubernetes.io/warn: restricted
+            pod-security.kubernetes.io/warn-version: latest

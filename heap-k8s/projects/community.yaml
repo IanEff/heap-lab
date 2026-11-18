@@ -1,0 +1,21 @@
+# Everything under apps/. Namespaced resources only, in app-* namespaces. If your
+# app needs a CRD or a ClusterRole, the sync fails with a "not permitted in
+# project" error; move that piece to platform/.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: community
+  namespace: argocd
+  annotations:
+    # heap-lab: heap-k8s finding 1. Without a wave the project is wave 0, and
+    # root deadlocks at wave -3 on an argocd Application whose project
+    # doesn't exist yet.
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  description: Recurser apps under apps/
+  sourceRepos:
+    - "*"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "app-*"
+  clusterResourceWhitelist: []

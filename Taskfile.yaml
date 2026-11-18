@@ -85,8 +85,13 @@ tasks:
 
   # ── heap-k8s, run against the lab ──────────────────────────────────────────
   argo:
-    desc: "Phase 4: install Argo CD from HEAP_K8S (first run) or push its latest commit and refresh"
-    cmds: [scripts/argo.sh]
+    desc: "Phase 4: publish the config repo from broome, then install Argo CD (first run) or refresh. SOURCE=lab (heap-k8s/, default) or upstream"
+    cmds: ['scripts/argo.sh {{.SOURCE}}']
+
+  argo-drift:
+    desc: "heap-k8s/ against HEAP_K8S: upstream commits since the mirror, the diff, what's left out"
+    silent: true
+    cmds: [scripts/argo-drift.sh]
 
   argo-status:
     desc: Argo CD's Applications on the new cluster

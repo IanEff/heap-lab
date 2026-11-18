@@ -1,0 +1,4 @@
+# The StorageClass is a plain manifest in manifests/, not the chart's, so it
+# reads the same as everything else here.
+storageClass:
+  create: false

@@ -13,7 +13,8 @@ heap-lab is three Lima VMs standing in for RC's Heap cluster, so cluster-config'
 3. **Fidelity is the point.** Anything added to the VMs either mirrors something seen on Heap (cite the scan or note it came from) or is the lab's own instrument (canary, watch, data checksum) and is labelled as such. Every departure from Heap goes in the README's "What isn't" table.
 4. **One NIC on user-v2.** Don't add a second network; Cilium's device autodetection is part of what's being tested (D-17). Don't change the DHCP address on eth0: Lima's ssh is forwarded to it.
 5. **Nothing outside the repo and `~/.lima`.** No edits to `~/.ssh/config` or `~/.kube/config`.
-6. **Never point the lab at Heap.** Inventory names end in `.heap-lab` and resolve only through `.state/ssh_config`. Don't add `cluster.recurse.com` names or the real inventory.
+6. **`heap-k8s/` is a mirror of recursecenter/heap-k8s at `HEAP_K8S_MIRRORED`.** Upstream's bytes except Heap's values (placeholders, filled by `heap_k8s_render`) and the deltas marked `heap-lab:` and listed in `heap-k8s/README.md`. A new delta needs a reason Heap's repo can't go green on the lab, a marker, and a row there; a fix heap-k8s needs is also a finding in the README. Re-mirror when `task argo-drift` fails.
+7. **Never point the lab at Heap.** Inventory names end in `.heap-lab` and resolve only through `.state/ssh_config`. Don't add `cluster.recurse.com` names or the real inventory.
 
 ## Gotchas already paid for
 

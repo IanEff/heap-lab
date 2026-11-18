@@ -1,0 +1,97 @@
+# Single replicas everywhere; Heap is one small cluster.
+global:
+  domain: argocd.recurse.cloud
+
+notifications:
+  enabled: false
+
+configs:
+  params:
+    # TLS ends at Cilium's ingress.
+    server.insecure: true
+
+  cm:
+    # heap-lab: task argo-ui's port-forward, standing in for
+    # https://argocd.recurse.cloud. The lab's Argo CD client on batchmate.id
+    # has http://localhost:8080/auth/callback as its redirect, so they must match.
+    url: http://localhost:8080
+    admin.enabled: true
+
+    # heap-lab: heap-k8s finding 2. Cilium's ingress runs on the host network
+    # and never fills in status.loadBalancer, so Argo CD's built-in Ingress
+    # check leaves every Ingress Progressing, platform/argocd's included, and
+    # root stops at wave -3. Patched into the live argocd-cm on 2026-11-17.
+    resource.customizations.health.networking.k8s.io_Ingress: |
+      hs = {}
+      hs.status = "Healthy"
+      hs.message = "Cilium's host-network ingress publishes no address"
+      return hs
+
+    # Waves on child Applications only wait if Argo CD assesses Application
+    # health, which it stopped doing by default in 1.8. Without this, the
+    # root app applies every platform component at once.
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil and obj.status.health ~= nil then
+        hs.status = obj.status.health.status
+        if obj.status.health.message ~= nil then
+          hs.message = obj.status.health.message
+        end
+      end
+      return hs
+
+    # Login through batchmate.id, the OIDC gateway in front of recurse.com
+    # (D-21). No Dex. batchmate.id refuses any authorize request without PKCE,
+    # confidential clients included, so enablePKCEAuthentication is required;
+    # Argo CD 3.6's server-side login sends it. Rehearsed in heap-lab
+    # 2026-11-17. The secret still has to be sealed: a SealedSecret
+    # `argocd-oidc` (key clientSecret) labeled app.kubernetes.io/part-of=argocd,
+    # in a platform/argocd/manifests/ directory added as a third source.
+    oidc.config: |
+      name: Recurse
+      issuer: https://batchmate.id
+      # heap-lab: your own client, from .env. Its secret goes in Secret
+      # argocd-oidc, which task oidc creates.
+      clientID: ${LAB_OIDC_ARGOCD_CLIENT_ID}
+      clientSecret: $argocd-oidc:clientSecret
+      requestedScopes: ["openid", "profile", "email"]
+      enablePKCEAuthentication: true
+
+  rbac:
+    # Everyone sees everything and can sync. Admins are listed one per line
+    # by subject: batchmate.id sends no groups, so the heap-admins line below
+    # matches nobody. The subject is the gateway's sub today, and the RC id once
+    # batchmate.id sends federated_claims. Keep comments on their own lines; a
+    # trailing "# ..." becomes part of the role name.
+    #   g, <subject>, role:admin
+    policy.default: role:recurser
+    policy.csv: |
+      p, role:recurser, applications, get, */*, allow
+      p, role:recurser, applications, sync, */*, allow
+      p, role:recurser, logs, get, */*, allow
+      p, role:recurser, projects, get, *, allow
+      p, role:recurser, clusters, get, *, allow
+      p, role:recurser, repositories, get, *, allow
+      g, recursecenter:heap-admins, role:admin
+    scopes: "[groups]"
+
+server:
+  ingress:
+    enabled: true
+    ingressClassName: cilium
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    tls: true
+
+repoServer:
+  resources:
+    requests:
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# Login goes straight to batchmate.id; the bundled Dex has nothing to do.
+dex:
+  enabled: false

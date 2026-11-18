@@ -1,0 +1,28 @@
+# The only thing applied by hand (bootstrap.sh does it). Everything else in the
+# cluster comes from the files this app points at: the two AppProjects, one
+# Application per platform component, and the ApplicationSet over apps/*.
+#
+# No resources-finalizer: deleting this app must not cascade through every
+# platform component and every community app.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  # "default", because the platform project is itself created by this app.
+  project: default
+  source:
+    repoURL: ${LAB_GIT_URL}
+    targetRevision: main
+    path: .
+    directory:
+      recurse: true
+      include: "{projects/*.yaml,platform/*/application.yaml,bootstrap/community-apps.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

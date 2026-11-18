@@ -92,3 +92,45 @@ wait_egress() {
         [ "$ok" -ge 3 ] || warn "${n} still can't reach the internet reliably; installs may time out."
     done
 }
+
+# ── heap-k8s ────────────────────────────────────────────────────────────────
+# heap-k8s/ in this repo is a subset of HEAP_K8S whose Heap values are written
+# as placeholders: ${LAB_GIT_URL} for the repo's own URL, ${LAB_IP_<NODE>} for
+# node addresses, ${LAB_OIDC_ARGOCD_CLIENT_ID} for Argo CD's client. Only YAML
+# is touched; READMEs and scripts keep Heap's values.
+HEAP_K8S_UPSTREAM_URL="https://github.com/recursecenter/heap-k8s.git"
+LAB_GIT_URL="http://${LAB_IP_BROOME}:${LAB_GIT_PORT}/heap-k8s.git"
+_heap_k8s_yaml() { find "$1" -path "$1/.git" -prune -o -type f \( -name '*.yaml' -o -name '*.yml' \) -print; }
+
+# Heap's values in a heap-k8s tree -> the placeholders. mercer's node target is
+# dropped: the lab has no mercer.
+heap_k8s_placeholders() {
+    local f
+    while IFS= read -r f; do
+        sed -i '' \
+            -e "s#${HEAP_K8S_UPSTREAM_URL}#\${LAB_GIT_URL}#g" \
+            -e 's#server: 23\.136\.216\.133#server: ${LAB_IP_BROOME}#' \
+            -e 's#clientID: svc_[0-9a-f]*#clientID: ${LAB_OIDC_ARGOCD_CLIENT_ID}#' \
+            -e 's#broome\.cluster\.recurse\.com:9100#${LAB_IP_BROOME}:9100#' \
+            -e 's#crosby\.cluster\.recurse\.com:9100#${LAB_IP_CROSBY}:9100#' \
+            -e 's#greene\.cluster\.recurse\.com:9100#${LAB_IP_GREENE}:9100#' \
+            -e '/mercer\.cluster\.recurse\.com:9100/d' \
+            "$f"
+    done < <(_heap_k8s_yaml "$1")
+}
+
+# The placeholders -> this lab's values. Stops on a placeholder it doesn't know.
+heap_k8s_render() {
+    local f left
+    while IFS= read -r f; do
+        sed -i '' \
+            -e "s#\${LAB_GIT_URL}#${LAB_GIT_URL}#g" \
+            -e "s#\${LAB_IP_BROOME}#${LAB_IP_BROOME}#g" \
+            -e "s#\${LAB_IP_CROSBY}#${LAB_IP_CROSBY}#g" \
+            -e "s#\${LAB_IP_GREENE}#${LAB_IP_GREENE}#g" \
+            -e "s#\${LAB_OIDC_ARGOCD_CLIENT_ID}#${LAB_OIDC_ARGOCD_CLIENT_ID:-}#g" \
+            "$f"
+    done < <(_heap_k8s_yaml "$1")
+    left=$(_heap_k8s_yaml "$1" | xargs grep -n '\${LAB_' || true)
+    [ -z "$left" ] || { echo "$left" >&2; error "Placeholders heap_k8s_render doesn't know (scripts/lib.sh)."; }
+}

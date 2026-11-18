@@ -1,0 +1,22 @@
+# Who can do what with kubectl. Everyone who logs in through batchmate.id sees
+# the whole cluster except Secrets; admins can do anything. Owners of an app get
+# edit in its namespace from apps/<name>/owners.yaml, not from here.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rbac
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  sources:
+    - repoURL: ${LAB_GIT_URL}
+      targetRevision: main
+      path: platform/rbac/manifests
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

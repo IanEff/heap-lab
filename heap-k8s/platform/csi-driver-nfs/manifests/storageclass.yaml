@@ -1,0 +1,23 @@
+# Every persistent volume on Heap lives here, on broome's /data. When broome or
+# its disk is down, every pod with a volume hangs; that's the accepted risk.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: heap-nfs
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: nfs.csi.k8s.io
+parameters:
+  # broome by IP: the name resolves differently on every node, and to
+  # 127.0.0.1 on broome itself.
+  server: ${LAB_IP_BROOME}
+  share: /data/k8s
+  subDir: ${pvc.metadata.namespace}/${pvc.metadata.name}
+  # Deleting a PVC (or an Argo prune) moves the directory aside instead of
+  # deleting the data.
+  onDelete: archive
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - hard

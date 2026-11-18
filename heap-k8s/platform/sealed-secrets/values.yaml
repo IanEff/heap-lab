@@ -1,0 +1,2 @@
+# The name kubeseal looks for by default, so nobody needs --controller-name.
+fullnameOverride: sealed-secrets-controller

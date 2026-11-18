@@ -1,0 +1,16 @@
+# Requests and limits for containers that don't set their own. The
+# ResourceQuota counts requests, so without these a pod with no requests set
+# would be refused.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      default:
+        cpu: "1"
+        memory: 1Gi

@@ -1,0 +1,30 @@
+# heap-lab: a self-signed stand-in for Heap's Let's Encrypt issuer. Same name,
+# wave and sync options, so every cert-manager.io/cluster-issuer annotation in
+# the repo works unchanged and the CRD ordering is still exercised. Heap's
+# issuer needs the sealed Cloudflare token; without it the ClusterIssuer is
+# Degraded ("failed to get secret cloudflare-api-token-secret"), cert-manager is
+# Degraded with it, and root never gets past wave -2 (seen 2026-11-18). The lab
+# has no token, and every rebuild would register a new ACME account.
+#
+# Heap's, at the commit in HEAP_K8S_MIRRORED:
+#
+#   spec:
+#     acme:
+#       server: https://acme-v02.api.letsencrypt.org/directory
+#       privateKeySecretRef:
+#         name: letsencrypt-prod
+#       solvers:
+#         - dns01:
+#             cloudflare:
+#               apiTokenSecretRef:
+#                 name: cloudflare-api-token-secret
+#                 key: api-token
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  selfSigned: {}

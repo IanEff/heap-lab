@@ -1,0 +1,12 @@
+# A starting share of a small cluster. Need more? Raise it in your PR and say why.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: quota
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 16Gi
+    requests.nvidia.com/gpu: "1"
+    persistentvolumeclaims: "5"
+    requests.storage: 50Gi

@@ -1,0 +1,16 @@
+# kubectl admins, one User per person. The username is what
+# `kubectl auth whoami` prints: batchmate:sub_... today, rc:<RC id> once
+# batchmate.id sends RC ids, at which point every entry here changes. Argo CD's
+# admins are listed separately, in platform/argocd/values.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: heap-admins
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects: []
+#  - apiGroup: rbac.authorization.k8s.io
+#    kind: User
+#    name: batchmate:sub_0123456789abcdef0123456789abcdef   # <name>
