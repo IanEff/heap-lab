@@ -71,11 +71,33 @@ users:
           - --oidc-extra-scope=email
           - --token-cache-dir=${KUBE_DIR}/oidc-cache
         interactiveMode: IfAvailable
+  # The device flow, as from a machine with no browser: approve the code at the
+  # link it prints. Same client and token cache as batchmate, so delete
+  # .state/kube/oidc-cache first to make it log in afresh.
+  - name: batchmate-device
+    user:
+      exec:
+        apiVersion: client.authentication.k8s.io/v1
+        command: ${KUBELOGIN}
+        args:
+          - get-token
+          - --oidc-issuer-url=${LAB_OIDC_ISSUER}
+          - --oidc-client-id=${LAB_OIDC_KUBECTL_CLIENT_ID}
+          - --oidc-extra-scope=profile
+          - --oidc-extra-scope=email
+          - --grant-type=device-code
+          - --skip-open-browser
+          - --token-cache-dir=${KUBE_DIR}/oidc-cache
+        interactiveMode: IfAvailable
 contexts:
   - name: heap-lab-login
     context:
       cluster: heap-lab
       user: batchmate
+  - name: heap-lab-device
+    context:
+      cluster: heap-lab
+      user: batchmate-device
 current-context: heap-lab-login
 EOF
 chmod 0600 "$LOGIN_KUBECONFIG"
@@ -111,10 +133,11 @@ new_kubectl -n argocd rollout restart deployment argocd-server >/dev/null
 new_kubectl -n argocd rollout status deployment argocd-server --timeout=180s
 
 # ── 4. Admins (the lab's own instrument) ────────────────────────────────────
-# LAB_OIDC_ADMINS: subjects as Argo CD sees them, space-separated. The gateway's
-# sub_… today; the RC id once batchmate.id sends federated_claims. Kubernetes
-# usernames follow the role's CEL rule: sub_… is batchmate:sub_…, a number is
-# rc:<id>. Each run rewrites both grants whole, so a name dropped from the list
+# LAB_OIDC_ADMINS: space-separated, each a gateway sub_… or an RC id. Argo CD
+# matches an RC id through the idp_subject claim, once its rbac scopes list it
+# (heap-k8s platform/argocd/values.yaml). Kubernetes usernames follow the role's
+# CEL rule: sub_… is batchmate:sub_…, a number is rc:<id>. On Heap, Kubernetes
+# admins come from the role's heap:admins group instead. Each run rewrites both grants whole, so a name dropped from the list
 # loses access; an empty list removes both. On Heap these belong in heap-k8s.
 step "Admins: ${LAB_OIDC_ADMINS:-none}"
 kube_user() { case "$1" in sub_*) echo "batchmate:$1" ;; *[!0-9]*|'') error "Can't map subject '$1' (want sub_… or an RC id)" ;; *) echo "rc:$1" ;; esac; }

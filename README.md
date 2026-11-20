@@ -71,6 +71,8 @@ Against cluster-config `k3s-ha-cilium` at `db38bb4`, uncommitted. Lima 2.2.1, an
 
 - The lab's `heap-k8s/` (2026-11-18), mirroring recursecenter/heap-k8s at `74d7823`, published over the IanEff copy on snapshot `pre-lab-k8s`. heap-k8s's own `scripts/validate.sh` passed on the rendered tree. root went Synced and Healthy for the first time: monitoring, kuberay-operator and nvidia-device-plugin were pruned (Prometheus's and Grafana's volumes went to `/data/k8s/archived-monitoring`), `rbac` arrived at wave 0, and `letsencrypt-prod` went Ready. `platform/argocd` stays OutOfSync until its first manual sync (4.12): the diff is Argo CD's `tracking-id` annotation on every object bootstrap.sh's Helm install made, `oidc.config`'s comments, and `LAB_OIDC_ADMINS`'s line in `policy.csv`. 4.8 on upstream's StorageClass, which has no `nfsvers`: a PVC bound, mounted as NFS 4.2, wrote, and was archived when its namespace went.
 
+- The RC id and the device flow (2026-11-20), against cluster-config `k3s-ha-cilium` at `fb4e0f7` plus the role change for `idp_issuer` and `idp_subject`, uncommitted. batchmate.id now advertises `device_authorization_endpoint`. kubelogin v1.36.4 with `--grant-type=device-code` and Heap's public `kubectl` client got an id token once the code was approved in a browser. kubelogin opens the link itself and prints nothing at the default log level. The token carried `idp_issuer: "https://www.recurse.com"` and `idp_subject: "7776"`, a string, and no `federated_claims`. `task k3s -l greene.heap-lab,crosby.heap-lab` changed only `authentication.yaml`; both API servers logged `reloaded authentication config`, with no restart. `whoami` came back `rc:7776` with groups `[batchmate:recursers heap:admins system:authenticated]`; `heap:admins` came from `admin_rc_ids` (nine unexpired that day). As that user with nothing bound to `rc:7776`: list pods everywhere and read `kube-system` logs yes, Secrets and delete no, cluster-admin no, because `LAB_OIDC_ADMINS` still named `sub_…`. With `7776` added, `can-i '*' '*'` yes. Then the lab's copy of heap-k8s took heap-k8s `64b3b5c`'s `scopes: "[groups, idp_subject]"` (only that change; `HEAP_K8S_MIRRORED` stays `74d7823`), `platform/argocd` was synced, and `LAB_OIDC_ADMINS` became `7776` alone. A device-flow id token from the lab's Argo CD client, as a bearer on Argo CD's API: userinfo `groups: ["7776"]`, and `can-i` yes for applications get, sync and delete and clusters create. Not run: the device flow from inside a VM with no browser.
+
 Not run yet: `task up STAGE=new` in one go (its pieces ran inside the migration), the k3s and Cilium upgrade drills, the OS upgrade drill.
 
 ## Findings for cluster-config
@@ -98,8 +100,8 @@ From the first `task argo`, 2026-11-17, against `IanEff/heap-k8s` at 66b7a83. Bo
 
 From the same run; for Chandler, not for a PR.
 
-1. **No CORS on `/oauth/token`.** A preflight gets `405`, so a browser-side PKCE flow (Argo CD's UI mode, for one) can't read the token response. Server-side flows are unaffected.
-2. **No `federated_claims` yet.** Both systems key on the gateway's `sub`, so every binding made today is rewritten when the RC id arrives. The role's username expression switches to `rc:<id>` on its own; Argo CD does too only if the claim uses Dex's shape, `{"user_id": "<id as a string>"}`.
+1. ~~**No CORS on `/oauth/token`.**~~ Fixed upstream in `dffe196` (2026-11-19): CORS from any origin on every endpoint. Not retested in the lab.
+2. **The RC id arrived as flat claims, not `federated_claims`** (`4f99af9`, 2026-11-17). `idp_issuer` and `idp_subject` come with the `profile` scope. The k3s role now reads them (2026-11-20 run above). Argo CD takes its subject only from `federated_claims.user_id`, so its subject stays `sub_…`; heap-k8s lists `idp_subject` in the rbac `scopes` so `g` lines can name RC ids instead.
 3. **The identity-provider slug is `www.recurse.com`.** The gateway's upstream callback is `https://batchmate.id/oauth/broker/www.recurse.com/callback`.
 
 ## Known issues
@@ -195,7 +197,7 @@ task argo-drift                    # before trusting any of it: is heap-k8s/ sti
 | `task play -- <playbook> <args>` | Any playbook from `playbooks/` or the checkout |
 | `task argo [SOURCE=lab\|upstream]` / `task argo-status` / `task argo-ui` | Phase 4: publish `heap-k8s/` (or all of `HEAP_K8S`) from broome, then bootstrap Argo CD or refresh it; list Applications; the UI on localhost:8080 |
 | `task argo-drift` | `heap-k8s/` against `HEAP_K8S`: upstream commits since the mirror (fails if any), the diff, what's left out |
-| `task oidc` / `task whoami` | batchmate.id logins: check the API servers, write `.state/kube/login.yaml`, configure Argo CD, apply `LAB_OIDC_ADMINS`; `kubectl auth whoami` as yourself |
+| `task oidc` / `task whoami` / `task whoami-device` | batchmate.id logins: check the API servers, write `.state/kube/login.yaml`, configure Argo CD, apply `LAB_OIDC_ADMINS`; `kubectl auth whoami` as yourself, with a browser or through the device flow |
 | `task watch` | Disruption probe until Ctrl-C, then outages per target |
 | `task canary [CLUSTER=new\|old\|delete-new\|delete-old]` | The probe's target app |
 | `task data-check` / `task data-record` | `/data` unchanged since the baseline |

@@ -13,3 +13,4 @@ k3s_eviction_hard_memory: 100Mi
 # client ID: OIDC off, as on Heap until its client is filled in.
 k3s_oidc_issuer: "{{ lookup('env', 'LAB_OIDC_ISSUER') }}"
 k3s_oidc_client_id: "{{ lookup('env', 'LAB_OIDC_KUBECTL_CLIENT_ID') }}"
+k3s_oidc_rc_issuer: "{{ lookup('env', 'LAB_OIDC_RC_ISSUER') }}"

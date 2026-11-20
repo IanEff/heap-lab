@@ -61,11 +61,13 @@ configs:
 
   rbac:
     # Everyone sees everything and can sync. Admins are listed one per line
-    # by subject: batchmate.id sends no groups, so the heap-admins line below
-    # matches nobody. The subject is the gateway's sub today, and the RC id once
-    # batchmate.id sends federated_claims. Keep comments on their own lines; a
-    # trailing "# ..." becomes part of the role name.
-    #   g, <subject>, role:admin
+    # by RC id: batchmate.id sends no groups, so the heap-admins line below
+    # matches nobody. Argo CD's own subject stays the gateway's sub_…, because
+    # it only takes an id from federated_claims, which batchmate.id doesn't
+    # send. The RC id comes in the idp_subject claim, and listing that claim in
+    # scopes makes Argo CD match g lines against it too. Keep comments on their
+    # own lines; a trailing "# ..." becomes part of the role name.
+    #   g, <RC id>, role:admin
     policy.default: role:recurser
     policy.csv: |
       p, role:recurser, applications, get, */*, allow
@@ -75,7 +77,7 @@ configs:
       p, role:recurser, clusters, get, *, allow
       p, role:recurser, repositories, get, *, allow
       g, recursecenter:heap-admins, role:admin
-    scopes: "[groups]"
+    scopes: "[groups, idp_subject]"
 
 server:
   ingress:

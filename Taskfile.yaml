@@ -115,6 +115,11 @@ tasks:
     interactive: true
     cmds: ['KUBECONFIG=.state/kube/login.yaml kubectl auth whoami']
 
+  whoami-device:
+    desc: "kubectl auth whoami through batchmate.id's device flow (approve the code it shows; rm -rf .state/kube/oidc-cache first to force a login)"
+    interactive: true
+    cmds: ['KUBECONFIG=.state/kube/login.yaml kubectl --context heap-lab-device auth whoami']
+
   # ── Instruments ────────────────────────────────────────────────────────────
   watch:
     desc: "Probe APIs and Ingress every second until Ctrl-C, then print outages. Run in its own terminal."
