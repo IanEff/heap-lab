@@ -70,10 +70,10 @@
   hosts: cluster
   become: true
   roles:
-    # Role params beat the role's vars/main.yml; the lab subnet stands in for
-    # the cluster /27. The other RC networks stay as they are and never send
-    # anything here.
-    - { role: firewall, cluster_network: "{{ lab_subnet }}" }
+    # Role params beat the role's vars/main.yml; the lab subnets stand in for
+    # the cluster /27 and its /64. The other RC networks stay as they are and
+    # never send anything here.
+    - { role: firewall, cluster_network: "{{ lab_subnet }}", cluster_network_v6: "{{ lab_subnet_v6 }}" }
     - fail2ban
     - host
     - env
@@ -181,7 +181,9 @@
   become: true
   tasks:
     # Evelyn's hand-edited fstab lines (2026-11-11): hard mounts, over IPv6 on
-    # Heap. The lab is IPv4-only. k3s-teardown.yml copies volumes here.
+    # Heap. Over IPv4 here: /etc/hosts has IPv4 only, and the lab's ULA would
+    # lose to IPv4 in address selection anyway (README, "What isn't").
+    # k3s-teardown.yml copies volumes here.
     - name: NFS mount of broome:/data
       ansible.posix.mount:
         path: /data

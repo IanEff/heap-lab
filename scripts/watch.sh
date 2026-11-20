@@ -9,6 +9,8 @@
 #                    broome (Heap's runbook curls from broome too). For the
 #                    canary the body is the writer's last timestamp, so an
 #                    answer more than 5 s old is "stale": NFS or the writer.
+#   <host>@<node>-v6 the same on the node's IPv6 address, for nodes whose
+#                    ingress answers there when the watch starts (dual-stack).
 #
 # Targets are whatever answers when the watch starts. Every probe goes to
 # .state/watch/<time>.csv; the terminal shows changes only, as offsets from
@@ -27,14 +29,21 @@ api_probe() {  # node -> http code; 000 when nothing answers
 
 IPS=""; for n in ${LAB_NODES}; do IPS="${IPS} ${n}=$(node_ip "$n")"; done
 IPS="${IPS# }"
-# scripts/guest/probe.sh, run on broome over ssh.
-remote() { on broome "MODE=$1 IPS='${IPS}' HOSTS='${2:-}' bash -s" < "${LAB_ROOT}/scripts/guest/probe.sh"; }
+# scripts/guest/probe.sh, run on broome over ssh: mode, IPS, HOSTS.
+remote() { on broome "MODE=$1 IPS='$2' HOSTS='${3:-}' bash -s" < "${LAB_ROOT}/scripts/guest/probe.sh"; }
 
 API_NODES=""
 for n in ${LAB_NODES}; do [ "$(api_probe "$n")" != 000 ] && API_NODES="${API_NODES} ${n}"; done
-HOSTS=$(remote pick | paste -sd' ' -)
+HOSTS=$(remote pick "$IPS" | paste -sd' ' -)
+# Each node's IPv6 address too, if its ingress answers there. An IPv4-only
+# cluster's Envoy doesn't listen on IPv6, so those targets are left out.
+V6=""
+for n in ${LAB_NODES}; do
+    t="${n}-v6=[$(node_ipv6 "$n")]"
+    [ -n "$HOSTS" ] && [ -n "$(remote pick "$t")" ] && { IPS="${IPS} ${t}"; V6="${V6} ${n}"; }
+done
 info "API:     ${API_NODES:- none}"
-info "Ingress: ${HOSTS:-none}, on every node"
+info "Ingress: ${HOSTS:-none}, on every node; over IPv6 on:${V6:- none}"
 info "Log:     ${CSV#"${LAB_ROOT}/"}   (Ctrl-C to stop and summarize)"
 echo "epoch,target,state,detail" > "$CSV"
 
@@ -54,7 +63,7 @@ api_loop() {
         sleep 1
     done
 }
-ingress_loop() { [ -n "$HOSTS" ] && remote loop "$HOSTS"; }
+ingress_loop() { [ -n "$HOSTS" ] && remote loop "$IPS" "$HOSTS"; }
 
 summarize() {
     echo

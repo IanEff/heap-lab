@@ -41,6 +41,9 @@ start_vm() {
         --set ".param.NodeIP = \"$(node_ip "$n")\""
         --set ".param.Hostname = \"${n}\""
         --set ".param.Gateway = \"${LAB_GATEWAY}\""
+        --set ".param.NodeIPv6 = \"$(node_ipv6 "$n")\""
+        --set ".param.UnreachablePodCIDR = \"${LAB_UNREACHABLE_POD_CIDR}\""
+        --set ".param.UnreachableServiceCIDR = \"${LAB_UNREACHABLE_SERVICE_CIDR}\""
         --set ".cpus = ${LAB_CPUS}"
         --set ".memory = \"$(node_mem "$n")\""
         --set ".disk = \"${LAB_DISK}\""
@@ -52,7 +55,7 @@ start_vm() {
         sets+=(--set ".additionalDisks = [{\"name\": \"$(data_disk)\", \"format\": false}]")
     fi
     case "$(vm_status "$name")" in
-        "")      step "Creating ${name} ($(node_ip "$n"), $(node_mem "$n"))"
+        "")      step "Creating ${name} ($(node_ip "$n"), $(node_ipv6 "$n"), $(node_mem "$n"))"
                  limactl create -y --name="${name}" "${sets[@]}" "${LAB_ROOT}/lima/node.yaml" >/dev/null ;;
         Running) info "${name} already running."; return 0 ;;
     esac
@@ -60,10 +63,19 @@ start_vm() {
     limactl start -y --timeout 10m "${name}" >"${STATE_DIR}/${name}.start.log" 2>&1 &
     PIDS+=("$!:${name}")
 }
-for n in ${LAB_NODES}; do start_vm "$n"; done
-for p in "${PIDS[@]+"${PIDS[@]}"}"; do
-    wait "${p%%:*}" || { tail -20 "${STATE_DIR}/${p#*:}.start.log" >&2; error "${p#*:} failed to start. Log: .state/${p#*:}.start.log"; }
-done
+wait_started() {
+    for p in "${PIDS[@]+"${PIDS[@]}"}"; do
+        wait "${p%%:*}" || { tail -20 "${STATE_DIR}/${p#*:}.start.log" >&2; error "${p#*:} failed to start. Log: .state/${p#*:}.start.log"; }
+    done
+    PIDS=()
+}
+# broome first, then the others together. greene and crosby mount broome:/data
+# hard with no nofail, as on Heap; on 2026-11-20 a greene that booted before
+# broome's NFS server was up never finished booting.
+for n in ${LAB_NODES}; do [ "$n" = broome ] && start_vm "$n"; done
+wait_started
+for n in ${LAB_NODES}; do [ "$n" = broome ] || start_vm "$n"; done
+wait_started
 bash "${LAB_ROOT}/scripts/ssh_config.sh"
 wait_egress
 phase_end

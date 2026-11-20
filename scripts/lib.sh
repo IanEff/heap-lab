@@ -35,6 +35,7 @@ esac
 upper()     { echo "$1" | tr '[:lower:]' '[:upper:]'; }
 node_var()  { local v="$1_$(upper "$2")"; echo "${!v}"; }
 node_ip()   { node_var LAB_IP "$1"; }
+node_ipv6() { node_var LAB_IPV6 "$1"; }
 node_mem()  { node_var LAB_MEMORY "$1"; }
 api_port()  { node_var LAB_API_PORT "$1"; }
 vm_name()   { echo "heap-$1"; }

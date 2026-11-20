@@ -1,5 +1,6 @@
 ---
 k3s_node_ip: "{{ lookup('env', 'LAB_IP_BROOME') }}"
+k3s_node_ipv6: "{{ lookup('env', 'LAB_IPV6_BROOME') }}"
 # cluster-config's roles/nfs_server: sdb on Heap, the lab's second disk here.
 data_disk:
   device: /dev/vdb

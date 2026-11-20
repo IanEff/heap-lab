@@ -1,10 +1,11 @@
 # Every heap-lab node. scripts/up.sh creates each instance from this file with
 #   --set '.param.NodeIP = "192.168.104.x"'  --set '.param.Hostname = "greene"'
 #   --set '.param.Gateway = "192.168.104.2"'
+#   --set '.param.NodeIPv6 = "fdf2:4f9f:1e83:90::11"'
 # and sets cpus, memory, images, portForwards and (broome) the data disk.
 #
 # Provisioning here is only what has to exist before Ansible can reach the
-# node: the fixed address and the hostname. Everything else is Ansible, from
+# node: the fixed addresses and the hostname. Everything else is Ansible, from
 # playbooks/ and from the cluster-config roles, so it can be read and re-run.
 
 minimumLimaVersion: "2.0.0"
@@ -29,7 +30,7 @@ images:
 mounts: []
 
 # One NIC, like every Heap node. user-v2 makes the VMs L2 neighbours, which
-# Cilium's autoDirectNodeRoutes needs.
+# Cilium's autoDirectNodeRoutes needs. It carries both families (below).
 networks:
   - lima: user-v2
 
@@ -44,17 +45,70 @@ param:
   NodeIP: ""
   Hostname: ""
   Gateway: ""
+  NodeIPv6: ""
+  UnreachablePodCIDR: ""
+  UnreachableServiceCIDR: ""
 
 provision:
   # The fixed address becomes eth0's primary (static addresses come up before
   # DHCP), and the default route uses it. Lima's DHCP address stays as a
   # secondary: Lima's ssh is forwarded to it, and changing it hangs limactl.
+  #
+  # IPv6 rides the same NIC: a static ULA address with Heap's interface ID.
+  # user-v2's switch (gvisor-tap-vsock) floods broadcast and forwards unicast
+  # to MACs it has seen, but drops multicast, so neighbour discovery and DAD
+  # never get an answer. heap-lab-ndp rewrites eth0's outgoing IPv6 multicast
+  # (33:33:*) to broadcast, which the switch floods; the receiving kernel still
+  # filters on the multicast IP. That's the lab's own instrument, not Heap's.
+  # There is no IPv6 router: no RA, no default route, no IPv6 internet.
+  #
+  # Runs on every boot; rewrites and applies only what changed, so a lima.yaml
+  # edited with new params takes effect on the next start.
   - mode: system
     script: |
       #!/bin/bash
       set -eu
-      [ -f /etc/netplan/60-heap-lab.yaml ] && exit 0
-      cat > /etc/netplan/60-heap-lab.yaml <<NETPLAN
+      changed=0
+      put() {  # path mode: stdin -> path, if different
+        local tmp; tmp=$(mktemp)
+        cat > "$tmp"
+        if cmp -s "$tmp" "$1"; then rm -f "$tmp"; else install -D -m "$2" "$tmp" "$1"; rm -f "$tmp"; changed=1; fi
+      }
+      put /etc/heap-lab/ndp.nft 644 <<'NFT'
+      # heap-lab: user-v2 drops multicast; send IPv6 multicast as broadcast.
+      table netdev heap_lab_ndp
+      delete table netdev heap_lab_ndp
+      table netdev heap_lab_ndp {
+        chain egress {
+          type filter hook egress device "eth0" priority 0;
+          ether daddr & ff:ff:00:00:00:00 == 33:33:00:00:00:00 ether daddr set ff:ff:ff:ff:ff:ff
+        }
+      }
+      NFT
+      put /etc/systemd/system/heap-lab-ndp.service 644 <<'UNIT'
+      [Unit]
+      Description=heap-lab: IPv6 multicast on eth0 as broadcast, for user-v2
+      After=sys-subsystem-net-devices-eth0.device
+      Requires=sys-subsystem-net-devices-eth0.device
+      Before=network-pre.target
+      Wants=network-pre.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/sbin/nft -f /etc/heap-lab/ndp.nft
+      ExecStop=/usr/sbin/nft delete table netdev heap_lab_ndp
+
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      if [ "$changed" = 1 ]; then
+        systemctl daemon-reload
+        systemctl enable heap-lab-ndp.service
+        systemctl restart heap-lab-ndp.service
+      fi
+      changed=0
+      put /etc/netplan/60-heap-lab.yaml 600 <<NETPLAN
       network:
         version: 2
         ethernets:
@@ -62,21 +116,29 @@ provision:
             dhcp4: true
             dhcp4-overrides:
               use-routes: false
-            addresses: [{{.Param.NodeIP}}/24]
+            addresses:
+              - {{.Param.NodeIP}}/24
+              - "{{.Param.NodeIPv6}}/64"
             routes:
               - to: default
                 via: {{.Param.Gateway}}
+              - to: {{.Param.UnreachablePodCIDR}}
+                type: unreachable
+              - to: {{.Param.UnreachableServiceCIDR}}
+                type: unreachable
       NETPLAN
-      chmod 600 /etc/netplan/60-heap-lab.yaml
-      netplan apply
+      [ "$changed" = 1 ] && netplan apply
       hostnamectl set-hostname {{.Param.Hostname}}
 
 probes:
   - mode: readiness
-    description: fixed address is up
+    description: fixed addresses are up
     script: |
       #!/bin/bash
-      ip -4 -o addr show dev eth0 | grep -q " {{.Param.NodeIP}}/"
+      ip -4 -o addr show dev eth0 | grep -q " {{.Param.NodeIP}}/" &&
+        ip -6 -o addr show dev eth0 -tentative | grep -q " {{.Param.NodeIPv6}}/64 "
     hint: |
       limactl shell <instance> -- sudo cat /etc/netplan/60-heap-lab.yaml
       limactl shell <instance> -- ip -br addr
+      limactl shell <instance> -- systemctl status heap-lab-ndp
+      limactl shell <instance> -- ip -6 neigh show dev eth0
