@@ -132,7 +132,7 @@ Against cluster-config `k3s-ha-cilium` at `db38bb4`, uncommitted. Lima 2.2.1, an
   | new-node | teardown of greene on the new cluster | "runs a k3s installed by roles/k3s" |
   | version | `k3s.yml -e k3s_version=v1.36.5+k3s1` on the v1.36.6 cluster | "Set k3s_allow_upgrade=true" |
 
-  The mount case refuses only because its mount sits outside `/var/lib/kubelet/pods`; a pod's own volume is unmounted by `k3s-killall.sh` first (finding 13). The bare-pod refusal is kubectl's, and comes before anything is copied or stopped. The first full run lost its last two cases to the boot hang under Known issues; `refusals.sh new` passed them on its own.
+  The mount case refuses only because its mount sits outside `/var/lib/kubelet/pods`; a pod's own volume is unmounted by `k3s-killall.sh` first (finding 13). The bare-pod refusal is kubectl's, and comes before anything is copied or stopped. The first full run lost its last two cases to the boot hang under Known issues; `refusals.sh new` passed them on its own. After the rebuild, `refusals.sh all` passed all eight in one run against `old-fresh` and `new-fresh`.
 
 - heap-k8s's `platform/cilium` against the role's Cilium (2026-11-21), on a throwaway restore of `new-dualstack`, restored away afterwards, with `task watch` running. The Application is heap-k8s `5c4473d`'s `platform/cilium/application.yaml`: chart 1.20.4, release `cilium` in `kube-system`, manual sync. Its values went inline, because the lab can't read the repo over SSH, and with `k8sServiceHost` changed from Heap's crosby to the lab's (invariant 7). Nothing went into `heap-k8s/`. Before: HelmChart 1.20.4 (generation 1), helm release `cilium` v1, IPAM `kubernetes`, IPv6 on, ingress on the host network.
   - **Applying it changed nothing, and Argo CD saw the other owner.** Every Cilium object, about 40, showed `OutOfSync`.
@@ -149,6 +149,8 @@ Against cluster-config `k3s-ha-cilium` at `db38bb4`, uncommitted. Lima 2.2.1, an
   - **mercer's drain moved traefik and blacked out the old ingress for about 4 s**, on broome as well as mercer. traefik had landed on mercer at the build; the drain evicted it and it came back on broome. On Heap the same happens at whichever card drains the node traefik runs on.
   - **mercer's card passed, bind mount included.** The teardown copied open-webui's volume to `/data/k8s-migration/mercer/` with the same sha256 and `0:0 644`. The teardown unmounted the store after killall and deleted the old containerd data (P-9); the role bind-mounted `/home/k3s-containerd` again before installing, and `heap-check joined mercer` passes "containerd store is bind-mounted". Cilium's ingress answers on .131 (runbook 6.2). The old cluster ended as broome alone, still serving `jupyter.recurse.cloud`.
 
+- `task up STAGE=new` from nothing (2026-11-21), after `task destroy FORCE=1`, against cluster-config `k3s-ha-cilium` at `dfb6639`: 15m12s, exit 0. VMs 259 s, `base.yml` 462 s (2m02s of it waiting for first-boot apt, then slow apt installs), `k3s.yml` 80 s, storage and canary 46 s, the `new-fresh` snapshot 65 s. `task check -- joined` passes on greene (14 checks), crosby (15) and broome (14), with no FAIL. `/data` unchanged. The VMs phase took 27 s on the four-node build an hour earlier and 25 s on the three-node old build after; the first-boot logs that would say why were overwritten when the snapshot restarted the VMs, and those restarts were READY in 16 s.
+
 Not run yet, roughly in the order they matter for Heap:
 
 1. ~~Why ingress on the healthy nodes dropped while greene was down (finding 9).~~ Explained 2026-11-21, above.
@@ -162,7 +164,7 @@ Not run yet, roughly in the order they matter for Heap:
 9. ~~The Cilium upgrade drill (3), plus whether greene and crosby fight over the HelmChart.~~ Run 2026-11-21, above (finding 12).
 10. ~~heap-k8s's `platform/cilium` against the role's Cilium.~~ Run 2026-11-21, above (D-24).
 11. ~~The OS upgrade drill (5), including whether k3s starts before crosby's fstab bind mount.~~ Run 2026-11-21, above.
-12. `task up STAGE=new` in one go (its pieces ran inside the migration).
+12. ~~`task up STAGE=new` in one go.~~ Run 2026-11-21, above.
 
 ## Findings for cluster-config
 
@@ -208,7 +210,7 @@ From the same run; for Chandler, not for a PR.
 
 ## Known issues
 
-- **A VM sometimes booted with no sshd, and `limactl start` waited its full 10 minutes: fixed 2026-11-21.** Seen three times that day. The cause was the lab's own `heap-lab-ndp.service`: with systemd's default dependencies it ran after `basic.target`, and its `Before=network-pre.target` closed a loop through networkd, `systemd-networkd-wait-online`, cloud-init and `sockets.target`. systemd breaks such a loop by deleting a job, and on the hung boots the job was `ssh.socket` (the journal of a hung boot on greene names the whole chain). The unit now has `DefaultDependencies=no`, as Debian's `nftables.service` does; the three instances got the new `provision` with `limactl edit --set`, and their next boots had no ordering cycles and IPv6 still worked. Every snapshot taken before the fix still has the old unit, so the first boot after restoring one can still hang until the provision step rewrites it. If it does, `limactl stop -f` the VM and start it again. Re-taking `old-fresh` and `new-dualstack` once would end it; that replaces the baselines, so it's Ian's call.
+- **A VM sometimes booted with no sshd, and `limactl start` waited its full 10 minutes: fixed 2026-11-21.** Seen three times that day. The cause was the lab's own `heap-lab-ndp.service`: with systemd's default dependencies it ran after `basic.target`, and its `Before=network-pre.target` closed a loop through networkd, `systemd-networkd-wait-online`, cloud-init and `sockets.target`. systemd breaks such a loop by deleting a job, and on the hung boots the job was `ssh.socket` (the journal of a hung boot on greene names the whole chain). The unit now has `DefaultDependencies=no`, as Debian's `nftables.service` does; the three instances got the new `provision` with `limactl edit --set`, and their next boots had no ordering cycles and IPv6 still worked. The lab was destroyed and rebuilt afterwards, so every snapshot now has the fixed unit; `new-fresh` and `old-fresh` booted all three nodes in about 16 s.
 
 - **Fix for the egress outages below:** stop all three VMs so `limactl usernet` exits, then start them (`task snap` does both). On 2026-11-17 the outage ran past 25 minutes and took guest-to-Mac traffic down with it; a restart of usernet cleared it at once. Its outbound connections were leaving from ProtonVPN's tunnel address (10.2.0.2).
 

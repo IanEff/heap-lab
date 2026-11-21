@@ -12,7 +12,7 @@
 #     mount          teardown with an NFS mount under /var/lib/kubelet
 #     flannel        k3s.yml with flannel.1 left behind
 #     cilium         k3s.yml with cilium_host left behind
-#   new (from REFUSAL_NEW_SNAP, default new-dualstack)
+#   new (from REFUSAL_NEW_SNAP, default new-fresh)
 #     new-node       teardown of a node the role installed
 #     version        k3s.yml with a different k3s_version, no k3s_allow_upgrade
 #
@@ -25,7 +25,7 @@ _TAG=refusals
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 WHAT="${1:-all}"
 OLD_SNAP="${REFUSAL_OLD_SNAP:-old-fresh}"
-NEW_SNAP="${REFUSAL_NEW_SNAP:-new-dualstack}"
+NEW_SNAP="${REFUSAL_NEW_SNAP:-new-fresh}"
 mkdir -p "${STATE_DIR}/runs"
 results=()
 
