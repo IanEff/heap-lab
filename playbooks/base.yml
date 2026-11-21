@@ -180,7 +180,7 @@
   hosts: cluster:!broome.heap-lab
   become: true
   tasks:
-    # Evelyn's hand-edited fstab lines (2026-11-11): hard mounts, over IPv6 on
+    # Hand-edited fstab lines (2026-11-11): hard mounts, over IPv6 on
     # Heap. Over IPv4 here: /etc/hosts has IPv4 only, and the lab's ULA would
     # lose to IPv4 in address selection anyway (README, "What isn't").
     # k3s-teardown.yml copies volumes here.
@@ -229,7 +229,7 @@
       ansible.builtin.shell: |
         set -eu
         cd /data
-        for d in archive minecraft k8s-storage ab amy atty evelyn florian gareth piya trey; do mkdir -p "$d"; done
+        for d in archive minecraft k8s-storage home-1 home-2 home-3 home-4 home-5 home-6 home-7 home-8; do mkdir -p "$d"; done
         mkdir -p k8s-storage/crosby-rancher k8s-storage/mercer-rancher
         for i in $(seq -w 1 73); do
           mkdir -p "archive/recurser-$i"

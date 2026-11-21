@@ -25,23 +25,23 @@ task up STAGE=new          # after task destroy: the migration's end state, buil
 | One NIC per node, all four on one /27 and one /64 (`2602:fb65:0:90::/64`), L2 neighbours, MTU 1500 | One NIC per VM on Lima's `user-v2` network carrying both families, L2 neighbours; addresses .138, .132, .133 and `::11`, `::3`, `::4` as on Heap, with neighbour discovery and DAD working | user-v2, plus fixed addresses set by netplan and `heap-lab-ndp` (How it works, Network) |
 | greene `cluster-init`, crosby second server, broome agent; two-member etcd | Same three roles; same etcd arithmetic | `inventory/hosts.yml`, cluster-config's `k3s.yml` |
 | Old cluster: broome v1.31.2 server on sqlite with `--flannel-backend=vxlan`; greene v1.31.6 agent with the GPU labels | Same versions, installed with the commands from master's `roles/k3s/tasks/{head,worker}.yaml` | `playbooks/old.yml` |
-| crosby: Atty's standalone v1.36.6 with Cilium 1.20.4 (cluster-pool), containerd bind-mounted from `/home/k3s-containerd`, an `lxc+` ufw rule | Same, with crosby's k3s flags reconstructed (see below) | `playbooks/old.yml`, `scripts/up.sh` |
+| crosby: a standalone v1.36.6 with Cilium 1.20.4 (cluster-pool), containerd bind-mounted from `/home/k3s-containerd`, an `lxc+` ufw rule | Same, with crosby's k3s flags reconstructed (see below) | `playbooks/old.yml`, `scripts/up.sh` |
 | configure.yml's host roles: firewall, fail2ban, host, env, metrics (node_exporter on 9100), oomd, nfs_server on broome | The same roles from your checkout | `playbooks/base.yml` |
-| ufw: deny in, allow from the cluster /27 and /64, ssh and 443 from anywhere, drift on broome and crosby | The firewall role with the lab's /24 and /64 as `cluster_network` and `cluster_network_v6`, plus the drift rules | `playbooks/base.yml` |
-| broome's `/data`: ext4 on sdb1, `defaults`, exported `*(rw,sync,no_subtree_check,no_root_squash)`, 0777, 12 entries, 73 archived homes | ext4 on vdb1 from the nfs_server role, seeded with the same counts | `playbooks/base.yml` |
+| ufw: deny in, allow from the cluster /27 and /64, plus hand-added rules on broome and crosby | The firewall role with the lab's /24 and /64 as `cluster_network` and `cluster_network_v6`, plus the drift rules | `playbooks/base.yml` |
+| broome's `/data`: ext4 on sdb1, exported over NFS, 12 top-level entries, 73 in the archive | ext4 on vdb1 from the nfs_server role, seeded with the same counts | `playbooks/base.yml` |
 | `broome` is 127.0.0.1 on broome, so `ray-pv` mounts it over loopback | The host role writes the same line; a `ray-pv` stand-in mounts it on broome | `manifests/old/workloads.yaml` |
 | The other nodes mount broome:/data `hard` | Same, over IPv4 | `playbooks/base.yml` |
 | local-path volumes on greene and broome, gpu-feature-discovery's subPath of `/etc`, an Ingress on traefik through servicelb | Stand-ins for each, with known bytes in every volume | `manifests/old/workloads.yaml` |
 | podman's conflist on greene and broome; Calico's conflist and kubeconfig on broome; setuid calico binaries on broome and greene | Same files (the binaries are inert) | `playbooks/base.yml` |
 | Swap on, `/swap.img`; inotify instances at Ubuntu's 128 | 1 GiB `/swap.img`, same fstab line; 128 | `playbooks/base.yml` |
 
-crosby's experiment is the weakest row. The scan recorded what Atty ended up with, not the command he ran. `playbooks/old.yml` uses `flannel-backend: none`, `disable-network-policy`, CIDRs 10.44/10.45 and kube-proxy left on; the 10.44 comes from his ufw rule, the rest is a guess.
+crosby's experiment is the weakest row. The scan recorded what the experiment ended up with, not the command that built it. `playbooks/old.yml` uses `flannel-backend: none`, `disable-network-policy`, CIDRs 10.44/10.45 and kube-proxy left on; the 10.44 comes from its ufw rule, the rest is a guess.
 
 ## What isn't
 
 | Difference | What it means for a drill |
 |---|---|
-| arm64 (Apple silicon), Heap is amd64 | k3s, Cilium and the busybox stand-ins are multi-arch. An app image that's amd64-only (JupyterHub's `treylawrence/jupyter-ray:latest` is a candidate) won't start here. |
+| arm64 (Apple silicon), Heap is amd64 | k3s, Cilium and the busybox stand-ins are multi-arch. An app image that's amd64-only (JupyterHub's user image is a candidate) won't start here. |
 | No GPUs, no `gpu` group | `default-runtime: nvidia`, the device plugin and the GPU labels from the new role go untested. The old stand-in carries the old role's labels only. |
 | `system-reserved` 512Mi and eviction at 100Mi, against Heap's 6-10Gi and 1Gi | The reservations can't be sized here. Everything else the role renders is unchanged. |
 | 4 GiB per VM, 2 vCPUs | Memory pressure arrives sooner than on Heap; it isn't a test of Heap's headroom. |
@@ -93,7 +93,7 @@ Not run yet, roughly in the order they matter for Heap:
 7. broome down on the new stage, and broome rebooted with no `nofail` on `/data`.
 8. The k3s upgrade drill (2), with the role's refusal first; then a minor version once one exists.
 9. The Cilium upgrade drill (3), plus whether greene and crosby fight over the HelmChart: bump the version, run `-l greene.heap-lab` only, restart k3s on crosby, see which version wins.
-10. Atty's `platform/cilium` against the role's Cilium, on a throwaway snapshot, as evidence for D-24.
+10. The standalone experiment's `platform/cilium` against the role's Cilium, on a throwaway snapshot, as evidence for D-24.
 11. The OS upgrade drill (5), including whether k3s starts before crosby's fstab bind mount.
 12. `task up STAGE=new` in one go (its pieces ran inside the migration).
 

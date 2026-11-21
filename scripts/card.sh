@@ -5,7 +5,7 @@
 #   b  k3s-teardown.yml        c  heap-check clean      d  /data unchanged
 #   e  the copied volumes      f  reboot (lab: only when Cilium left interfaces)
 #   g  skipped: no GPUs        h  k3s.yml -l <node>     i-m heap-check joined
-# crosby also gets runbook step 3.4 (Atty's lxc+ ufw rule) before h.
+# crosby also gets runbook step 3.4 (the experiment's lxc+ ufw rule) before h.
 set -euo pipefail
 _TAG=card
 # shellcheck source=lib.sh
@@ -39,7 +39,7 @@ s "e: what the teardown copied"
 on "$N" "sudo ls -la /data/k8s-migration/${N}/ 2>/dev/null || echo '(no local-path volumes on ${N})'"
 
 if [ "$N" = crosby ] && on crosby 'sudo ufw status' | grep -q 'lxc'; then
-    s "3.4: delete Atty's lxc+ rule"
+    s "3.4: delete the experiment's lxc+ rule"
     on crosby 'sudo ufw delete allow in on lxc+ from 10.44.0.0/16'
 fi
 

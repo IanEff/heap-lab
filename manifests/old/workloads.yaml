@@ -89,10 +89,10 @@ spec:
         paths:
           - {path: /, pathType: Prefix, backend: {service: {name: hub, port: {number: 80}}}}
 ---
-# A user server's home on greene (claim-trey-lawrence, 180K on Heap).
+# A user server's home on greene (claim-a-recurser, 180K on Heap).
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: {name: claim-trey-lawrence---d4c4fe9c, namespace: jupyterhub}
+metadata: {name: claim-a-recurser---d4c4fe9c, namespace: jupyterhub}
 spec:
   accessModes: [ReadWriteOnce]
   storageClassName: local-path
@@ -100,7 +100,7 @@ spec:
 ---
 apiVersion: batch/v1
 kind: Job
-metadata: {name: seed-trey, namespace: jupyterhub}
+metadata: {name: seed-home, namespace: jupyterhub}
 spec:
   template:
     spec:
@@ -113,7 +113,7 @@ spec:
           volumeMounts: [{name: home, mountPath: /home/jovyan}]
       volumes:
         - name: home
-          persistentVolumeClaim: {claimName: claim-trey-lawrence---d4c4fe9c}
+          persistentVolumeClaim: {claimName: claim-a-recurser---d4c4fe9c}
 ---
 apiVersion: v1
 kind: Namespace

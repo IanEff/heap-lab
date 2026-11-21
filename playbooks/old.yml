@@ -3,13 +3,13 @@
 #   broome  k3s v1.31.2 server, sqlite, --flannel-backend=vxlan, the bundled
 #           traefik, servicelb and local-path
 #   greene  k3s v1.31.6 agent with the old role's GPU labels
-#   crosby  outside the old cluster: Atty's standalone v1.36.6 cluster-init
+#   crosby  outside the old cluster: a standalone v1.36.6 cluster-init
 #           with Cilium 1.20.4 from Helm, containerd bind-mounted from /home
 #
 # The install commands are the ones master's roles/k3s used (git show
 # master:roles/k3s/tasks/head.yaml, worker.yaml), with versions pinned:
 # the old worker install had none and took whatever was stable that day.
-# crosby's flags are reconstructed from the 2026-11-16 scan; Atty's exact
+# crosby's flags are reconstructed from the 2026-11-16 scan; the exact
 # command isn't recorded.
 
 - name: broome, the old server
@@ -82,7 +82,7 @@
         state: restarted
       when: agent_config.changed
 
-- name: crosby, Atty's experiment
+- name: crosby, the standalone experiment
   hosts: experiment
   become: true
   vars:
@@ -110,7 +110,7 @@
         state: directory
         mode: "0755"
 
-    - name: Atty's k3s config (reconstructed)
+    - name: The experiment's k3s config (reconstructed)
       ansible.builtin.copy:
         dest: /etc/rancher/k3s/config.yaml
         content: |
@@ -141,7 +141,7 @@
 
     # Seen 2026-11-16: `Anywhere on lxc+ ALLOW 10.44.0.0/16`. Runbook step 3.4
     # deletes it.
-    - name: Atty's hand-added ufw rule
+    - name: The experiment's hand-added ufw rule
       community.general.ufw:
         rule: allow
         interface: lxc+

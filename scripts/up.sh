@@ -124,7 +124,7 @@ if [ "$STAGE" = old ]; then
     old_kubectl apply -f "${LAB_ROOT}/manifests/old/workloads.yaml" >/dev/null
     old_kubectl -n michael rollout status sts/concourse-postgresql --timeout=5m >/dev/null
     old_kubectl -n jupyterhub rollout status deploy/hub --timeout=5m >/dev/null
-    old_kubectl -n jupyterhub wait --for=condition=complete job/seed-trey --timeout=5m >/dev/null
+    old_kubectl -n jupyterhub wait --for=condition=complete job/seed-home --timeout=5m >/dev/null
     old_kubectl -n ray-system rollout status deploy/rc-ray-head --timeout=5m >/dev/null
     old_kubectl -n gpu-operator rollout status ds/gpu-feature-discovery --timeout=5m >/dev/null
     phase_end
