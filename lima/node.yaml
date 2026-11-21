@@ -88,10 +88,17 @@ provision:
       put /etc/systemd/system/heap-lab-ndp.service 644 <<'UNIT'
       [Unit]
       Description=heap-lab: IPv6 multicast on eth0 as broadcast, for user-v2
-      After=sys-subsystem-net-devices-eth0.device
+      # No default dependencies, as Debian's nftables.service: with them this
+      # unit runs after basic.target, and Before=network-pre.target closes a
+      # loop through networkd, cloud-init and sockets.target. systemd breaks
+      # it by dropping a job, sometimes ssh.socket, and then Lima never gets
+      # in (seen 2026-11-21).
+      DefaultDependencies=no
+      After=local-fs.target sys-subsystem-net-devices-eth0.device
       Requires=sys-subsystem-net-devices-eth0.device
-      Before=network-pre.target
+      Before=network-pre.target shutdown.target
       Wants=network-pre.target
+      Conflicts=shutdown.target
 
       [Service]
       Type=oneshot

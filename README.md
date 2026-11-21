@@ -117,18 +117,42 @@ Against cluster-config `k3s-ha-cilium` at `db38bb4`, uncommitted. Lima 2.2.1, an
   - **The bytes moved intact.** New PVCs in `app-concourse` and `app-jupyterhub` (kubectl, not Argo CD, because of heap-k8s finding 6). Steps 5.d and 5.e: the old hub scaled to zero, then `rsync -aHAX --numeric-ids` on broome from the migration copies (greene's two) and from local-path (the hub's), each followed by a dry run that listed nothing. All three volumes matched at all three points, the home's `1000:100` included; each PVC root took local-path's `0777`. A pod running as `1000:100` with every capability dropped read the notebook with its hash unchanged and wrote a new file as `1000:100`.
   - **The teardown didn't refuse broome with `ray-pv` mounted.** broome's card ran with the old cluster's `rc-ray-head` still mounting all of `/data` over NFS under `/var/lib/kubelet/pods`. "Stop k3s and unmount pod volumes" (`k3s-killall.sh`) unmounted it, "List what is still mounted under k3s's directories" then found nothing, and the uninstall went ahead. `/data` was unchanged (148 files, same checksum), the hub's copy in `/data/k8s-migration/broome/` matched, and broome joined at v1.36.5 with every check passing. The 11-17 run behaved the same. Finding 13.
 
+- The k3s upgrade drill (2026-11-21). v1.36.6+k3s1 is the newest v1.36 release, so the drill went from v1.36.5 to v1.36.6. The cluster from the two runs above (cards at v1.36.5, broome joined last) got the canary and became snapshot `t-v1365`. `task k3s` with the checkout's v1.36.6 refused on the first host: "greene.heap-lab runs k3s version v1.36.5+k3s1 (3dd98cc5), the inventory pins v1.36.6+k3s1. Set k3s_allow_upgrade=true to upgrade." `task k3s -- -e k3s_allow_upgrade=true` with `task watch` running took 61 s: greene, then crosby, then broome, `changed=1` each (the installer). APIs: both out 2 to 4 s while greene restarted, and both out 8 s while crosby did (D-2). Ingress never dropped. The canary's pods kept their restart counts through their nodes' k3s restarts. `heap-check joined` passed on all three at v1.36.6 (14, 15 and 14 checks). Not run: a minor version, since none exists yet.
+
+- A test for every refusal (2026-11-21): `scripts/refusals.sh [old|new|all]`, new, against cluster-config `k3s-ha-cilium` at `dfb6639`. Each case passes only if the play fails and its log has that refusal's own message. The script restores `old-fresh` or `new-dualstack` before each group and between cases that change a node, so it can be rerun whenever the branch changes. All eight refused:
+
+  | Case | Setup | Refused with |
+  |---|---|---|
+  | confirm | teardown of greene with `teardown_confirm=crosby` | "Pass -e teardown_confirm=greene" |
+  | old-k3s | `k3s.yml -l greene` on the old cluster | "has a k3s install this role didn't make" |
+  | bare-pod | a pod with no controller on greene, then its teardown | kubectl drain's "declare no controller" |
+  | mount | a read-only NFS mount of broome's `/data` at `/var/lib/kubelet/heap-lab-refusal`, then teardown | "Still mounted under k3s's directories" |
+  | flannel | a clean teardown of greene, a dummy `flannel.1`, then `k3s.yml -l greene` | "flannel.1 or cni0 still exists" |
+  | cilium | the same with a dummy `cilium_host` | "cilium_host still exists" |
+  | new-node | teardown of greene on the new cluster | "runs a k3s installed by roles/k3s" |
+  | version | `k3s.yml -e k3s_version=v1.36.5+k3s1` on the v1.36.6 cluster | "Set k3s_allow_upgrade=true" |
+
+  The mount case refuses only because its mount sits outside `/var/lib/kubelet/pods`; a pod's own volume is unmounted by `k3s-killall.sh` first (finding 13). The bare-pod refusal is kubectl's, and comes before anything is copied or stopped. The first full run lost its last two cases to the boot hang under Known issues; `refusals.sh new` passed them on its own.
+
+- heap-k8s's `platform/cilium` against the role's Cilium (2026-11-21), on a throwaway restore of `new-dualstack`, restored away afterwards, with `task watch` running. The Application is heap-k8s `5c4473d`'s `platform/cilium/application.yaml`: chart 1.20.4, release `cilium` in `kube-system`, manual sync. Its values went inline, because the lab can't read the repo over SSH, and with `k8sServiceHost` changed from Heap's crosby to the lab's (invariant 7). Nothing went into `heap-k8s/`. Before: HelmChart 1.20.4 (generation 1), helm release `cilium` v1, IPAM `kubernetes`, IPv6 on, ingress on the host network.
+  - **Applying it changed nothing, and Argo CD saw the other owner.** Every Cilium object, about 40, showed `OutOfSync`.
+  - **A manual sync rewrote Cilium in 5 s.** `cilium-config` went to cluster-pool IPAM with IPv6 off, and the agents rolled. The nodes kept their pod ranges (the operator adopted the existing ones), so pods kept working. The ingress became a `LoadBalancer` Service on the node IPs (`loadBalancerClass: io.cilium/node`, `nodeIPAM`) in place of the role's host-network listener, and nothing answered on any node's port 80 over IPv4. Argo CD called it Synced and Healthy.
+  - **helm-controller didn't notice.** Over the next three minutes, and through a `systemctl restart k3s` on crosby, the HelmChart stayed at generation 1, no helm job ran, and the cluster kept Argo CD's values.
+  - **The role's next Cilium change took it back, by reinstalling.** `task k3s -- -e k3s_cilium_version=1.20.5` changed both servers' manifests. helm-controller logged "Suspended Job kube-system/helm-install-cilium for delete", `cilium-config` didn't exist for about 20 s, and then the role's values were back (IPAM `kubernetes`, IPv6 on, ingress answering 200 everywhere). Argo CD went OutOfSync and, being manual, did nothing more.
+  - The watch: ingress on each node's IPv4 address failed about 430 of 609 probes, from the sync to the role's run. So the two owners don't fight continuously. Whichever acted last wins until the other acts, and the role wins by uninstalling and reinstalling the CNI. Evidence for D-24.
+
 Not run yet, roughly in the order they matter for Heap:
 
 1. ~~Why ingress on the healthy nodes dropped while greene was down (finding 9).~~ Explained 2026-11-21, above.
 2. ~~Backing out of a card.~~ Run 2026-11-21, above (finding 10).
 3. The two clusters side by side between Phases 3 and 6. Needs a fourth VM for mercer: with greene gone, the lab's old cluster is broome alone, so flannel between two old nodes beside Cilium is untested.
 4. ~~Phase 5 for real, and broome's card against the 7.g gate.~~ Run 2026-11-21, above (finding 13).
-5. A test for every refusal in the role and the teardown, rerun whenever the branch changes.
+5. ~~A test for every refusal in the role and the teardown.~~ `scripts/refusals.sh`, run 2026-11-21, above; rerun whenever the branch changes.
 6. ~~A merge that deletes `apps/`. The same with the git server stopped.~~ Run 2026-11-21, above (heap-k8s findings 6 and 7).
 7. ~~broome down on the new stage, and broome rebooted with no `nofail` on `/data`.~~ Run 2026-11-21, above (finding 11).
-8. The k3s upgrade drill (2), with the role's refusal first; then a minor version once one exists.
+8. ~~The k3s upgrade drill (2), with the role's refusal first.~~ Run 2026-11-21, above. A minor version once one exists.
 9. ~~The Cilium upgrade drill (3), plus whether greene and crosby fight over the HelmChart.~~ Run 2026-11-21, above (finding 12).
-10. The standalone experiment's `platform/cilium` against the role's Cilium, on a throwaway snapshot, as evidence for D-24.
+10. ~~heap-k8s's `platform/cilium` against the role's Cilium.~~ Run 2026-11-21, above (D-24).
 11. ~~The OS upgrade drill (5), including whether k3s starts before crosby's fstab bind mount.~~ Run 2026-11-21, above.
 12. `task up STAGE=new` in one go (its pieces ran inside the migration).
 
@@ -173,6 +197,8 @@ From the same run; for Chandler, not for a PR.
 3. **The identity-provider slug is `www.recurse.com`.** The gateway's upstream callback is `https://batchmate.id/oauth/broker/www.recurse.com/callback`.
 
 ## Known issues
+
+- **A VM sometimes booted with no sshd, and `limactl start` waited its full 10 minutes: fixed 2026-11-21.** Seen three times that day. The cause was the lab's own `heap-lab-ndp.service`: with systemd's default dependencies it ran after `basic.target`, and its `Before=network-pre.target` closed a loop through networkd, `systemd-networkd-wait-online`, cloud-init and `sockets.target`. systemd breaks such a loop by deleting a job, and on the hung boots the job was `ssh.socket` (the journal of a hung boot on greene names the whole chain). The unit now has `DefaultDependencies=no`, as Debian's `nftables.service` does; the three instances got the new `provision` with `limactl edit --set`, and their next boots had no ordering cycles and IPv6 still worked. Every snapshot taken before the fix still has the old unit, so the first boot after restoring one can still hang until the provision step rewrites it. If it does, `limactl stop -f` the VM and start it again. Re-taking `old-fresh` and `new-dualstack` once would end it; that replaces the baselines, so it's Ian's call.
 
 - **Fix for the egress outages below:** stop all three VMs so `limactl usernet` exits, then start them (`task snap` does both). On 2026-11-17 the outage ran past 25 minutes and took guest-to-Mac traffic down with it; a restart of usernet cleared it at once. Its outbound connections were leaving from ProtonVPN's tunnel address (10.2.0.2).
 
