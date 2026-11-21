@@ -25,13 +25,8 @@ stop_all() {
 }
 start_all() {
     local n pids=()
-    # broome first: the others mount its /data hard at boot (see up.sh).
-    limactl start -y --timeout 10m "$(vm_name broome)" >"${STATE_DIR}/$(vm_name broome).start.log" 2>&1 \
-        || error "$(vm_name broome) failed to start; see .state/$(vm_name broome).start.log"
-    for n in ${LAB_NODES}; do
-        [ "$n" = broome ] && continue
-        limactl start -y --timeout 10m "$(vm_name "$n")" >"${STATE_DIR}/$(vm_name "$n").start.log" 2>&1 & pids+=($!)
-    done
+    # All three at once: each node's k3s waits for its peers (see up.sh).
+    for n in ${LAB_NODES}; do limactl start -y --timeout 10m "$(vm_name "$n")" >"${STATE_DIR}/$(vm_name "$n").start.log" 2>&1 & pids+=($!); done
     for p in "${pids[@]}"; do wait "$p" || error "A VM failed to start; see .state/*.start.log"; done
     bash "${LAB_ROOT}/scripts/ssh_config.sh"
     step "Waiting for internet access from every node"

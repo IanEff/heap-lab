@@ -22,5 +22,6 @@ heap-lab is three Lima VMs standing in for RC's Heap cluster, so cluster-config'
 - cluster-config's `nfs_server` role formats the whole device before partitioning it, which only works on a disk that's already partitioned. `base.yml` partitions and formats vdb1 first.
 - user-v2's switch drops multicast, so IPv6 neighbour discovery gets no answer. Pinned neighbours don't work either: under vz, Lima ignores `macAddress` on the first user-v2 NIC and derives it from the host's machine id and the instance dir. Hence `heap-lab-ndp`.
 - A node with no Cilium sends pod-range packets to Lima's gateway, and enough of them stall every VM's TCP egress. The `unreachable` routes in `lima/node.yaml` (`LAB_UNREACHABLE_*`) stop that; don't remove them.
+- Start the three VMs together (`up.sh` and `snap.sh` do). On the new stage a node's k3s unit doesn't finish starting until it reaches its peers, and Lima's `limactl start` waits on boot, which waits on that unit. One at a time hangs.
 - `limactl edit --set` has yq's `load()` disabled. To swap a section of a stopped instance's `lima.yaml`, pass it inline as JSON (`yq -o=json -I=0 .provision lima/node.yaml`).
 - `limactl snapshot` is QEMU-only. `scripts/snap.sh` clones the vz disks with `cp -c` while all three VMs are stopped.

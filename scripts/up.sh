@@ -69,12 +69,12 @@ wait_started() {
     done
     PIDS=()
 }
-# broome first, then the others together. greene and crosby mount broome:/data
-# hard with no nofail, as on Heap; on 2026-11-20 a greene that booted before
-# broome's NFS server was up never finished booting.
-for n in ${LAB_NODES}; do [ "$n" = broome ] && start_vm "$n"; done
-wait_started
-for n in ${LAB_NODES}; do [ "$n" = broome ] || start_vm "$n"; done
+# All three at once, never one at a time. On the new stage k3s's unit doesn't
+# finish starting until it can reach its peers (greene and crosby are etcd's
+# two members, broome's agent needs a server), multi-user.target waits for it,
+# Lima's boot scripts wait for that, and limactl start waits for those. Seen
+# 2026-11-20: greene started alone, and broome started first, both hung there.
+for n in ${LAB_NODES}; do start_vm "$n"; done
 wait_started
 bash "${LAB_ROOT}/scripts/ssh_config.sh"
 wait_egress
