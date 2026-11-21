@@ -44,7 +44,11 @@ if [ "$N" = crosby ] && on crosby 'sudo ufw status' | grep -q 'lxc'; then
 fi
 
 s "h: k3s.yml -l ${H}"
-bash "${LAB_ROOT}/scripts/play.sh" k3s.yml -l "${H}"
+# CARD_ARGS: extra arguments for k3s.yml only, e.g. '-e k3s_version=...' to
+# build an older cluster for the upgrade drill without touching the checkout.
+# Pair it with HEAP_K3S_VERSION so heap-check expects the same version.
+read -ra card_args <<< "${CARD_ARGS:-}"
+bash "${LAB_ROOT}/scripts/play.sh" k3s.yml -l "${H}" "${card_args[@]+"${card_args[@]}"}"
 bash "${LAB_ROOT}/scripts/kubeconfig.sh" >/dev/null
 
 s "i-m: heap-check joined"
