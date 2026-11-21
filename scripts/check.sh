@@ -10,7 +10,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 export HEAP_DOMAIN="${LAB_DOMAIN}"
 export HEAP_NODES="${LAB_NODES}"
-export HEAP_BIND_MOUNT_NODES=crosby
+export HEAP_BIND_MOUNT_NODES="crosby$([ "${LAB_MERCER:-0}" = 1 ] && echo " mercer")"
 export HEAP_SSH="ssh -F ${SSH_CONFIG} -o BatchMode=yes -o ConnectTimeout=10"
 export HEAP_K3S_VERSION="${HEAP_K3S_VERSION:-$(sed -n 's/^k3s_version: *//p' "${HEAP_REPO}/roles/k3s/defaults/main.yml")}"
 export KUBECONFIG="${KUBE_DIR}/new.yaml"

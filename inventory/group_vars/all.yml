@@ -9,7 +9,3 @@ ld_library_path_dirs: ""
 lab_domain: "{{ lookup('env', 'LAB_DOMAIN') }}"
 lab_subnet: "{{ lookup('env', 'LAB_SUBNET_PREFIX') }}.0/24"
 lab_subnet_v6: "{{ lookup('env', 'LAB_IPV6_PREFIX') }}::/64"
-lab_ips:
-  greene: "{{ lookup('env', 'LAB_IP_GREENE') }}"
-  crosby: "{{ lookup('env', 'LAB_IP_CROSBY') }}"
-  broome: "{{ lookup('env', 'LAB_IP_BROOME') }}"

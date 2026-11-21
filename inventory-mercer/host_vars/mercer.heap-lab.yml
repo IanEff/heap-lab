@@ -1,0 +1,7 @@
+---
+k3s_node_ip: "{{ lookup('env', 'LAB_IP_MERCER') }}"
+k3s_node_ipv6: "{{ lookup('env', 'LAB_IPV6_MERCER') }}"
+# As on Heap (cluster-config's host_vars/mercer.cluster.recurse.com/k3s.yml):
+# containerd's store bind-mounted from /home. playbooks/old.yml sets up the
+# mount as the old bindmount role left it.
+k3s_containerd_bind_source: /home/k3s-containerd

@@ -2,7 +2,7 @@
 # heap-lab: up.sh [old|new]
 # Build the lab to a stage, or resume it if it's already there.
 #   1. Preflight: tools, cluster-config checkout, Lima's user-v2 network.
-#   2. Three VMs in parallel (broome gets a second disk for /data).
+#   2. The VMs in parallel (broome gets a second disk for /data).
 #   3. playbooks/base.yml: configure.yml's roles plus Heap's hand edits.
 #   4. old: playbooks/old.yml, Cilium on crosby, stand-in workloads.
 #      new: cluster-config's k3s.yml, csi-driver-nfs, heap-nfs, the canary.
@@ -120,19 +120,23 @@ if [ "$STAGE" = old ]; then
     phase_end
 
     phase_begin "old workloads"
-    wait_nodes "${KUBE_DIR}/old.yaml" 2
+    wait_nodes "${KUBE_DIR}/old.yaml" $(( $(echo ${LAB_NODES} | wc -w) - 1 ))   # all but crosby
     old_kubectl apply -f "${LAB_ROOT}/manifests/old/workloads.yaml" >/dev/null
     old_kubectl -n michael rollout status sts/concourse-postgresql --timeout=5m >/dev/null
     old_kubectl -n jupyterhub rollout status deploy/hub --timeout=5m >/dev/null
     old_kubectl -n jupyterhub wait --for=condition=complete job/seed-home --timeout=5m >/dev/null
     old_kubectl -n ray-system rollout status deploy/rc-ray-head --timeout=5m >/dev/null
     old_kubectl -n gpu-operator rollout status ds/gpu-feature-discovery --timeout=5m >/dev/null
+    if [ "${LAB_MERCER:-0}" = 1 ]; then
+        old_kubectl apply -f "${LAB_ROOT}/manifests/old/mercer.yaml" >/dev/null
+        old_kubectl -n vllm rollout status sts/open-webui --timeout=5m >/dev/null
+    fi
     phase_end
 else
     phase_begin "k3s.yml"
     bash "${LAB_ROOT}/scripts/play.sh" k3s.yml
     bash "${LAB_ROOT}/scripts/kubeconfig.sh"
-    wait_nodes "${KUBE_DIR}/new.yaml" 3
+    wait_nodes "${KUBE_DIR}/new.yaml" "$(echo ${LAB_NODES} | wc -w)"
     phase_end
 
     phase_begin "storage and canary"

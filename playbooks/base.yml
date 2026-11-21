@@ -115,8 +115,8 @@
         path: /etc/hosts
         marker: "# {mark} heap-lab nodes"
         block: |
-          {% for n, ip in lab_ips.items() if n != inventory_hostname_short %}
-          {{ ip }}	{{ n }}.{{ lab_domain }} {{ n }}
+          {% for h in groups['cluster'] if h != inventory_hostname %}
+          {{ hostvars[h].k3s_node_ip }}	{{ h }} {{ h.split('.')[0] }}
           {% endfor %}
 
     - name: /etc/cni/net.d, which podman created on Heap
@@ -124,7 +124,7 @@
         path: /etc/cni/net.d
         state: directory
         mode: "0755"
-      when: inventory_hostname_short in ['greene', 'broome']
+      when: inventory_hostname_short in ['greene', 'mercer', 'broome']
 
     # findings 2026-11-13: podman's conflist on greene, mercer and broome.
     - name: podman's CNI config
@@ -133,7 +133,7 @@
         content: |
           {"cniVersion": "0.4.0", "name": "podman", "plugins": [{"type": "bridge", "bridge": "cni-podman0", "isGateway": true, "ipMasq": true, "ipam": {"type": "host-local", "routes": [{"dst": "0.0.0.0/0"}], "ranges": [[{"subnet": "10.88.0.0/16", "gateway": "10.88.0.1"}]]}}, {"type": "portmap", "capabilities": {"portMappings": true}}]}
         mode: "0644"
-      when: inventory_hostname_short in ['greene', 'broome']
+      when: inventory_hostname_short in ['greene', 'mercer', 'broome']
 
 # findings 2026-11-13: Calico's conflist and kubeconfig still in broome's
 # /etc/cni/net.d, setuid calico binaries in /opt/cni/bin on broome and greene.
@@ -196,7 +196,7 @@
 # 10.0.0.0/16, 23.136.216.0/24 and 443 from anywhere; broome 1022 too. greene
 # has none of it. Ansible only adds rules, so nothing ever removed these.
 - name: ufw drift
-  hosts: crosby.heap-lab:broome.heap-lab
+  hosts: cluster:!greene.heap-lab
   become: true
   tasks:
     - name: Hand-added rules

@@ -3,6 +3,7 @@
 #   broome  k3s v1.31.2 server, sqlite, --flannel-backend=vxlan, the bundled
 #           traefik, servicelb and local-path
 #   greene  k3s v1.31.6 agent with the old role's GPU labels
+#   mercer  the same, plus containerd bind-mounted from /home (LAB_MERCER=1)
 #   crosby  outside the old cluster: a standalone v1.36.6 cluster-init
 #           with Cilium 1.20.4 from Helm, containerd bind-mounted from /home
 #
@@ -42,12 +43,31 @@
       delay: 5
       changed_when: false
 
-- name: greene, an old agent
+- name: greene (and mercer), old agents
   hosts: old_agents
   become: true
   vars:
     old_token: "{{ hostvars[groups['old_server'][0]]['node_token']['content'] | b64decode | trim }}"
+    containerd_dir: /var/lib/rancher/k3s/agent/containerd
   tasks:
+    # mercer only: the deleted bindmount role's work, as on crosby below.
+    - name: Directories for the containerd bind mount
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop: ["{{ k3s_containerd_bind_source | default('') }}", "{{ containerd_dir }}"]
+      when: k3s_containerd_bind_source is defined
+
+    - name: Bind-mount containerd's store from /home
+      ansible.posix.mount:
+        path: "{{ containerd_dir }}"
+        src: "{{ k3s_containerd_bind_source | default('') }}"
+        fstype: none
+        opts: bind
+        state: mounted
+      when: k3s_containerd_bind_source is defined
+
     - name: Install k3s as master's worker.yaml did
       ansible.builtin.shell: >-
         curl -sfL https://get.k3s.io |

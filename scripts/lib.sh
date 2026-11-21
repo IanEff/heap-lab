@@ -21,6 +21,8 @@ source "${LAB_ROOT}/config/heap-lab.env"
 # shellcheck disable=SC1091
 [ -f "${LAB_ROOT}/.env" ] && source "${LAB_ROOT}/.env"
 LAB_ROOT="${LAB_ROOT}"
+# mercer, the optional fourth node (config/heap-lab.env).
+[ "${LAB_MERCER:-0}" = 1 ] && case " ${LAB_NODES} " in *" mercer "*) ;; *) LAB_NODES="${LAB_NODES} mercer" ;; esac
 set +a
 
 mkdir -p "${STATE_DIR}"

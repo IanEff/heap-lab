@@ -28,4 +28,7 @@ export ANSIBLE_LOG_PATH="${log}"
 echo "# ${path} $* | cluster-config $(repo_ref)" > "${log}"
 info "${pb} (cluster-config $(repo_ref)) → ${log#"${LAB_ROOT}/"}"
 cd "${LAB_ROOT}"
-exec ansible-playbook "${path}" "$@"
+# mercer's inventory is separate so the three-node lab never sees it.
+inv=()
+[ "${LAB_MERCER:-0}" = 1 ] && inv=(-i "${LAB_ROOT}/inventory" -i "${LAB_ROOT}/inventory-mercer")
+exec ansible-playbook "${inv[@]+"${inv[@]}"}" "${path}" "$@"

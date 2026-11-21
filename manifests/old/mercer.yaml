@@ -1,0 +1,60 @@
+# mercer's stand-in, applied only with LAB_MERCER=1 (scripts/up.sh).
+# vllm/open-webui on Heap (heap inventory 2026-11-16): a StatefulSet pinned to
+# mercer with a 2Gi local-path volume, Service open-webui on port 80, Ingress
+# chat.recurse.cloud on traefik. The stand-in keeps the shape and the volume,
+# with known bytes so k3s-teardown.yml's copy can be checked.
+#
+# It gives the old cluster a backend on an agent that isn't broome, so traffic
+# to it crosses flannel's vxlan between broome and mercer while greene and
+# crosby run the new cluster beside them (README, drill 3).
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: vllm}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: open-webui, namespace: vllm}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: {requests: {storage: 2Gi}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: open-webui, namespace: vllm}
+spec:
+  replicas: 1
+  serviceName: open-webui
+  selector: {matchLabels: {app: open-webui}}
+  template:
+    metadata: {labels: {app: open-webui}}
+    spec:
+      nodeSelector: {kubernetes.io/hostname: mercer}
+      containers:
+        - name: open-webui
+          image: busybox:1.37
+          command: [sh, -c, 'test -f /app/backend/data/webui.db || head -c 524288 /dev/urandom > /app/backend/data/webui.db; mkdir -p /www; echo open-webui > /www/index.html; httpd -f -p 8080 -h /www']
+          ports: [{containerPort: 8080}]
+          volumeMounts: [{name: data, mountPath: /app/backend/data}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: open-webui}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: open-webui, namespace: vllm}
+spec:
+  selector: {app: open-webui}
+  ports: [{port: 80, targetPort: 8080}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: open-webui-ingress, namespace: vllm}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: chat.recurse.cloud
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: open-webui, port: {number: 80}}}}
